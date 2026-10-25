@@ -1,0 +1,26 @@
+# secrets & local data
+.env
+.data/
+backend/testdata/private/*
+!backend/testdata/private/.gitkeep
+
+# build artefacts
+bin/
+dist/
+node_modules/
+coverage/
+*.out
+*.prof
+*.test
+out.json
+backend/out.json
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# frontend
+frontend/playwright-report/
+frontend/test-results/

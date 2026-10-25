@@ -1,0 +1,8 @@
+#!/bin/sh
+# Remove AI attribution lines from commit messages.
+sed -i.bak -E \
+  -e '/^[Cc]o-[Aa]uthored-[Bb]y:.*([Cc]laude|[Aa]nthropic|noreply@anthropic\.com)/d' \
+  -e '/[Gg]enerated with .*[Cc]laude/d' \
+  -e '/^[Cc]laude-[Ss]ession:/d' \
+  -e '/claude\.ai\/code/d' \
+  "$1" && rm -f "$1.bak"
