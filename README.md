@@ -2,11 +2,39 @@
 
 Consolidates tradebooks from several Indian brokers (Zerodha, Groww, Upstox, Angel One) into one FIFO-matched, fully explained capital-gains and business-income report for the ITR.
 
-> **Status:** Phase 0 (project setup). See [TAXPL_BUILD_SPEC.md](TAXPL_BUILD_SPEC.md) for the full build plan.
+> **Status:** Phase 1 complete: the core engine runs as a CLI with 34 hand-verified golden cases and property tests. Phase 2 (API, database, background jobs) is in progress. See [TAXPL_BUILD_SPEC.md](TAXPL_BUILD_SPEC.md) for the full build plan.
 
 ## The problem
 
 Traders in India commonly use two or three broker apps. Each gives its own tax P&L and none of them combine. At filing time the user has to work out which gains are short-term, which are long-term, which trades were intraday or F&O, what cost applies to shares bought before 1 Feb 2018, and what happened after splits, bonuses and demergers. This tool does that work and shows how every number was reached.
+
+## What it does
+
+- Parses broker tradebooks (Zerodha now; Groww, Upstox and Angel One in Phase 2) into one normalised trade format, reporting every rejected row with its line number.
+- Applies splits, bonuses, demergers and mergers to lots on their ex-date.
+- Matches every sale FIFO **per demat account** (CBDT Circular 768) with partial-lot consumption and same-day intraday netting.
+- Classifies every gain: STCG, LTCG, intraday (speculative), F&O (non-speculative), buyback (three dated regimes).
+- Applies 31-Jan-2018 grandfathering per lot, including the post-2018 split adjustment most statements get wrong.
+- Summarises per year with the rules of that year (FY 2023-24 to Tax Year 2026-27 under the Income-tax Act 2025), F&O turnover per the ICAI Guidance Note, loss set-off and carry-forward rules, and a clearly labelled tax estimate.
+- Explains every number: each gain line carries the lots, dates, adjustments, grandfathering comparison and rule references used.
+
+## How correctness is proven
+
+- **34 golden cases** in `backend/testdata/golden/`, each with a hand-computed `expected.json` and a note explaining the arithmetic. See [docs/edge-cases.md](docs/edge-cases.md).
+- **Property tests** (`pgregory.net/rapid`) on the matcher: never sells more than bought, lot quantities and costs never negative, cost is conserved to the paisa, FIFO order within a sale, intraday quantity equals min(buy, sell), results independent of input order, accounts independent of each other.
+- **Holding-period property test**: the long-term rule is monotonic and agrees with day counts away from the boundary; the boundary itself is pinned by golden cases 04 and 32.
+- **Replay**: every golden case runs twice and asserts a byte-identical report checksum.
+- **No floats**: a test fails the build if `float32`/`float64` appears in any pure engine package; money is `shopspring/decimal` end to end.
+- **Rules are data with sources**: [docs/tax-rules.md](docs/tax-rules.md) lists every rule, its statutory or practitioner source and the test that proves it. Each rules file has a `verified_by` field for the CA's sign-off.
+
+## Try the CLI
+
+```sh
+cd backend
+go run ./cmd/seed -out ../.data/seed -trades 500 -fno 40     # synthetic Zerodha tradebooks
+go run ./cmd/taxpl calculate --fy 2025-26 ../.data/seed/zerodha_account1_tradebook.csv ../.data/seed/zerodha_account1_fno.csv
+go run ./cmd/taxpl rules                                       # which years and rates are loaded
+```
 
 ## Run locally
 
@@ -18,6 +46,12 @@ make api       # in one terminal
 make worker    # in another
 make web       # frontend
 ```
+
+`make check` runs lint plus every test (no Docker needed for the engine tests).
+
+## Architecture decisions
+
+See [docs/adr/](docs/adr/): FIFO per demat account, rules as versioned data, the holding-period boundary, and the pure-engine / deterministic-replay design.
 
 ## Disclaimer
 

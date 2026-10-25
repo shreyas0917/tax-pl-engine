@@ -1,0 +1,46 @@
+{
+  "summaries": {
+    "2025-26": {
+      "stcg": "0",
+      "ltcg": "0",
+      "intraday": "0",
+      "fno": "650",
+      "fno_turnover": "650",
+      "buyback_dividend": "0",
+      "buyback_exempt": "0",
+      "estimated_tax": "0"
+    }
+  },
+  "gains": [
+    {
+      "fy": "2025-26",
+      "category": "FNO",
+      "account": "A",
+      "symbol": "NIFTY",
+      "sale_date": "2025-07-03",
+      "acquisition_date": "2025-07-01",
+      "quantity": "100",
+      "sale_value": "1500",
+      "cost": "1000",
+      "charges": "0",
+      "gain": "500"
+    },
+    {
+      "fy": "2025-26",
+      "category": "FNO",
+      "account": "A",
+      "symbol": "NIFTY",
+      "sale_date": "2025-07-03",
+      "acquisition_date": "2025-07-02",
+      "quantity": "50",
+      "sale_value": "750",
+      "cost": "600",
+      "charges": "0",
+      "gain": "150"
+    }
+  ],
+  "review": [
+    "OPEN_FNO_POSITION"
+  ],
+  "open_lots": []
+}

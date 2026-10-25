@@ -1,0 +1,22 @@
+{
+  "note": "100 OLDCO @500 merged 10:7 into MERGED: 70 shares, cost 50000 and the Feb-2024 date carry over (s.47(vii), s.49(2)). Sold @900 in Mar 2025: LTCG 13000.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "corporate_actions": [
+    {
+      "id": "ca1",
+      "isin": "INE111A01011",
+      "kind": "MERGER",
+      "ex_date": "2024-11-01",
+      "ratio_from": "10",
+      "ratio_to": "7",
+      "new_isin": "INE222B01022",
+      "new_symbol": "MERGED"
+    }
+  ]
+}

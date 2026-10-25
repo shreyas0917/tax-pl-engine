@@ -1,0 +1,10 @@
+{
+  "note": "Long NIFTY call +2500; short BANKNIFTY future -3000 (sold 750000, bought back 753000). F&O net -500; turnover = |2500| + |3000| = 5500 (ICAI GN para 5.10(b)).",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "fo.csv",
+      "account": "A"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+# Rules for FY 2023-24 (AY 2024-25) under the Income-tax Act, 1961 (pre-Budget-2024 rates).
+year: "2023-24"
+law: "Income-tax Act, 1961"
+year_label: "FY 2023-24 (AY 2024-25)"
+version: 1
+equity:
+  long_term_after_months: 12
+  long_term_boundary: "on_or_after_anniversary"
+  periods:
+    - from: "2023-04-01"
+      to: "2024-03-31"
+      stcg_rate: "0.15"
+      ltcg_rate: "0.10"
+  ltcg_exemption: "100000"
+  ltcg_exemption_allocation: "pro_rata"
+  rebate_87a_on_ltcg: false
+grandfathering:
+  enabled: true
+  cutoff_acquisition_date: "2018-01-31"
+  fmv_date: "2018-01-31"
+  apply_to_bonus_shares: true
+intraday:
+  netting: "min_buy_sell_per_day"
+buyback:
+  periods:
+    - from: "2023-04-01"
+      to: "2024-03-31"
+      regime: "exempt_115qa"
+fno:
+  turnover_method: "absolute_pnl"
+  audit_threshold: "10000000"
+  audit_threshold_low_cash: "100000000"
+  audit_low_cash_pct: "0.05"
+losses:
+  - loss: "STCL"
+    set_off_against: ["STCG", "LTCG"]
+    carry_forward_years: 8
+    carry_forward_against: ["STCG", "LTCG"]
+  - loss: "LTCL"
+    set_off_against: ["LTCG"]
+    carry_forward_years: 8
+    carry_forward_against: ["LTCG"]
+  - loss: "SPECULATIVE"
+    set_off_against: ["SPECULATIVE"]
+    carry_forward_years: 4
+    carry_forward_against: ["SPECULATIVE"]
+  - loss: "NON_SPECULATIVE_BUSINESS"
+    set_off_against: ["ANY_EXCEPT_SALARY"]
+    carry_forward_years: 8
+    carry_forward_against: ["BUSINESS"]
+references:
+  short_term_asset: "s.2(42A)"
+  stcg: "s.111A"
+  ltcg: "s.112A"
+  grandfathering: "s.55(2)(ac)"
+  speculative: "s.43(5)"
+  audit: "s.44AB"
+  set_off: "s.70, s.71"
+  carry_forward: "s.72, s.73, s.74"
+  buyback: "s.115QA / s.10(34A)"
+sources:
+  - "https://cleartax.in/s/long-term-capital-gains-ltcg-tax"
+  - "https://treelife.in/taxation/buyback-tax-in-india/"
+verified_by: ""

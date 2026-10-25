@@ -1,0 +1,54 @@
+{
+  "note": "Buy-side brokerage 20 is added to cost (1020); STT 1 is not. Sell-side brokerage 20 is deducted; STT 2 is not. Gain = 2000 - 1020 - 20 = 960.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "extra_trades": [
+    {
+      "id": "c1",
+      "account_id": "A",
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "kind": "REGULAR",
+      "side": "BUY",
+      "quantity": "10",
+      "price": "100",
+      "trade_date": "2025-04-10",
+      "charges": {
+        "brokerage": "20",
+        "stt": "1",
+        "exchange_fee": "0",
+        "sebi_fee": "0",
+        "gst": "0",
+        "stamp_duty": "0",
+        "source": "imported"
+      }
+    },
+    {
+      "id": "c2",
+      "account_id": "A",
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "kind": "REGULAR",
+      "side": "SELL",
+      "quantity": "10",
+      "price": "200",
+      "trade_date": "2025-09-10",
+      "charges": {
+        "brokerage": "20",
+        "stt": "2",
+        "exchange_fee": "0",
+        "sebi_fee": "0",
+        "gst": "0",
+        "stamp_duty": "0",
+        "source": "imported"
+      }
+    }
+  ]
+}

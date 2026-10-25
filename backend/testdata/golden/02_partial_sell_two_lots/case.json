@@ -1,0 +1,10 @@
+{
+  "note": "Lots 10@100 (May) and 10@120 (Jun); sell 15@150 in Sep. FIFO: 10 from lot1 (+500), 5 from lot2 (+150). Lot2 keeps 5 @ cost 600.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

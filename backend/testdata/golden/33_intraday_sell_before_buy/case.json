@@ -1,0 +1,10 @@
+{
+  "note": "Short first (sell 10:00, buy 14:00) with no holdings is still an intraday pair: +200, no review item.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

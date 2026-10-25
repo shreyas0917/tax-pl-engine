@@ -1,0 +1,28 @@
+{
+  "note": "FMV 605 per ORIGINAL share; 1:2 split in 2019 makes it 302.50 per share. 200 sold @400: cost = max(30000, min(60500, 80000)) = 60500, LTCG 19500. Multiplying 605 by 200 would wrongly give a 41000 loss.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "instruments": [
+    {
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "fmv_2018_01_31": "605"
+    }
+  ],
+  "corporate_actions": [
+    {
+      "id": "ca1",
+      "isin": "INE009A01021",
+      "kind": "SPLIT",
+      "ex_date": "2019-09-20",
+      "ratio_from": "1",
+      "ratio_to": "2"
+    }
+  ]
+}

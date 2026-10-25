@@ -1,0 +1,2 @@
+symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time
+INFY,INE009A01021,2023-05-01,NSE,EQ,EQ,buy,false,100,100,1046,10460,2023-05-01T10:00:00

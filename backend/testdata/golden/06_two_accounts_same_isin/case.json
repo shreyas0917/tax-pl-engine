@@ -1,0 +1,14 @@
+{
+  "note": "FIFO is per demat account (CBDT Circular 768/1998). B's sale consumes B's 200-cost lot, not A's older 100-cost lot.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    },
+    {
+      "name": "b.csv",
+      "account": "B"
+    }
+  ]
+}

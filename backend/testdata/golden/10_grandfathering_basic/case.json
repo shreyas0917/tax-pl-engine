@@ -1,0 +1,18 @@
+{
+  "note": "Bought 100@300 in 2017, FMV on 31-Jan-2018 500, sold @600. Cost = max(30000, min(50000, 60000)) = 50000; LTCG 10000.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "instruments": [
+    {
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "fmv_2018_01_31": "500"
+    }
+  ]
+}

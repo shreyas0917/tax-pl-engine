@@ -1,0 +1,10 @@
+{
+  "note": "Two long lots (100@10, 100@12), sell 150@15: FIFO closes lot1 (+500) and half of lot2 (+150); 50 stay open and are flagged.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "fo.csv",
+      "account": "A"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time,expiry_date
+NIFTY25JUL25000PE,,2025-07-01,NFO,FO,PE,buy,false,100,10,1054,10540,2025-07-01T10:00:00,2025-07-31
+NIFTY25JUL25000PE,,2025-07-02,NFO,FO,PE,buy,false,100,12,1055,10550,2025-07-02T10:00:00,2025-07-31
+NIFTY25JUL25000PE,,2025-07-03,NFO,FO,PE,sell,false,150,15,1056,10560,2025-07-03T10:00:00,2025-07-31

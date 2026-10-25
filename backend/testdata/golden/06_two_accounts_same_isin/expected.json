@@ -1,0 +1,39 @@
+{
+  "summaries": {
+    "2024-25": {
+      "stcg": "500",
+      "ltcg": "0",
+      "intraday": "0",
+      "fno": "0",
+      "fno_turnover": "0",
+      "buyback_dividend": "0",
+      "buyback_exempt": "0",
+      "estimated_tax": "100"
+    }
+  },
+  "gains": [
+    {
+      "fy": "2024-25",
+      "category": "STCG_EQUITY",
+      "account": "B",
+      "symbol": "INFY",
+      "sale_date": "2024-10-10",
+      "acquisition_date": "2024-05-10",
+      "quantity": "10",
+      "sale_value": "2500",
+      "cost": "2000",
+      "charges": "0",
+      "gain": "500"
+    }
+  ],
+  "review": [],
+  "open_lots": [
+    {
+      "account": "A",
+      "symbol": "INFY",
+      "quantity": "10",
+      "cost": "1000",
+      "acquired": "2024-04-10"
+    }
+  ]
+}

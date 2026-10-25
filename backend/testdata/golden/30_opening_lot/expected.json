@@ -1,0 +1,31 @@
+{
+  "summaries": {
+    "2025-26": {
+      "stcg": "0",
+      "ltcg": "5000",
+      "intraday": "0",
+      "fno": "0",
+      "fno_turnover": "0",
+      "buyback_dividend": "0",
+      "buyback_exempt": "0",
+      "estimated_tax": "0"
+    }
+  },
+  "gains": [
+    {
+      "fy": "2025-26",
+      "category": "LTCG_EQUITY",
+      "account": "A",
+      "symbol": "INFY",
+      "sale_date": "2025-05-05",
+      "acquisition_date": "2020-01-15",
+      "quantity": "50",
+      "sale_value": "10000",
+      "cost": "5000",
+      "charges": "0",
+      "gain": "5000"
+    }
+  ],
+  "review": [],
+  "open_lots": []
+}

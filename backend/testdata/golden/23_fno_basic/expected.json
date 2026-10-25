@@ -1,0 +1,44 @@
+{
+  "summaries": {
+    "2024-25": {
+      "stcg": "0",
+      "ltcg": "0",
+      "intraday": "0",
+      "fno": "-500",
+      "fno_turnover": "5500",
+      "buyback_dividend": "0",
+      "buyback_exempt": "0",
+      "estimated_tax": "0"
+    }
+  },
+  "gains": [
+    {
+      "fy": "2024-25",
+      "category": "FNO",
+      "account": "A",
+      "symbol": "BANKNIFTY",
+      "sale_date": "2024-06-04",
+      "acquisition_date": "2024-06-03",
+      "quantity": "15",
+      "sale_value": "750000",
+      "cost": "753000",
+      "charges": "0",
+      "gain": "-3000"
+    },
+    {
+      "fy": "2024-25",
+      "category": "FNO",
+      "account": "A",
+      "symbol": "NIFTY",
+      "sale_date": "2024-06-05",
+      "acquisition_date": "2024-06-03",
+      "quantity": "50",
+      "sale_value": "7500",
+      "cost": "5000",
+      "charges": "0",
+      "gain": "2500"
+    }
+  ],
+  "review": [],
+  "open_lots": []
+}

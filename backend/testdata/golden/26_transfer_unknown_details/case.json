@@ -1,0 +1,24 @@
+{
+  "note": "A transfer-in without the original date/cost must ask the user, not guess; the later sale then has no lot to match.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "b.csv",
+      "account": "B"
+    }
+  ],
+  "extra_trades": [
+    {
+      "id": "xi",
+      "account_id": "B",
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "kind": "TRANSFER_IN",
+      "side": "BUY",
+      "quantity": "100",
+      "price": "0",
+      "trade_date": "2025-05-01"
+    }
+  ]
+}

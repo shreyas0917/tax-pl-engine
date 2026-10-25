@@ -1,0 +1,23 @@
+{
+  "note": "A user-entered opening lot (50 @ cost 5000 from Jan 2020) resolves a sale: LTCG 5000.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "opening_lots": [
+    {
+      "account_id": "A",
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "origin": "OPENING",
+      "quantity_original": "50",
+      "quantity_open": "50",
+      "cost_original": "5000",
+      "cost_open": "5000",
+      "acquisition_date": "2020-01-15"
+    }
+  ]
+}

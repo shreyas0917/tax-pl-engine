@@ -1,0 +1,18 @@
+{
+  "note": "Actual cost 550 exceeds min(FMV 500, sale 600): actual cost stays. LTCG 5000.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "instruments": [
+    {
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "fmv_2018_01_31": "500"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time
+INFY,INE009A01021,2017-06-01,NSE,EQ,EQ,buy,false,100,300,1027,10270,2017-06-01T10:00:00
+INFY,INE009A01021,2025-07-01,NSE,EQ,EQ,sell,false,100,400,1028,10280,2025-07-01T10:00:00

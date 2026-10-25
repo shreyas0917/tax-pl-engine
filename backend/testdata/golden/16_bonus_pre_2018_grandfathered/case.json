@@ -1,0 +1,28 @@
+{
+  "note": "Bonus shares allotted in 2017 have nil cost but qualify for the 31-Jan-2018 FMV (s.55(2)(ac); ITAT Mumbai, Jaisinghani 2025). Both lots: cost 40000 on sale 50000, LTCG 10000 each.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "instruments": [
+    {
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "fmv_2018_01_31": "400"
+    }
+  ],
+  "corporate_actions": [
+    {
+      "id": "ca1",
+      "isin": "INE009A01021",
+      "kind": "BONUS",
+      "ex_date": "2017-05-10",
+      "ratio_from": "1",
+      "ratio_to": "1"
+    }
+  ]
+}

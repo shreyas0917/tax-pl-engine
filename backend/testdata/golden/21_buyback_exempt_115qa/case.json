@@ -1,0 +1,24 @@
+{
+  "note": "Buyback on 1-Aug-2024 (before 1 Oct 2024): the company paid buyback tax u/s 115QA; proceeds 15000 are exempt u/s 10(34A). No gain, no loss.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "extra_trades": [
+    {
+      "id": "bb1",
+      "account_id": "A",
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "kind": "BUYBACK",
+      "side": "SELL",
+      "quantity": "100",
+      "price": "150",
+      "trade_date": "2024-08-01"
+    }
+  ]
+}

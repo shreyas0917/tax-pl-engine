@@ -1,0 +1,10 @@
+{
+  "note": "One sale of 15 spans a 13-month-old lot (10, LTCG 1000) and a 4-month-old lot (5, STCG 400).",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

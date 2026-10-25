@@ -1,0 +1,24 @@
+{
+  "note": "Buyback on 10-May-2026 under the 2025 Act as amended by Finance Act 2026: ordinary capital gains. Held 16 months: LTCG 5000.",
+  "fy": "2026-27",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "extra_trades": [
+    {
+      "id": "bb1",
+      "account_id": "A",
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "kind": "BUYBACK",
+      "side": "SELL",
+      "quantity": "100",
+      "price": "150",
+      "trade_date": "2026-05-10"
+    }
+  ]
+}

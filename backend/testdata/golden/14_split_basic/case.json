@@ -1,0 +1,20 @@
+{
+  "note": "10 @1000 split 1:5 -> 50 shares, total cost unchanged, acquisition date unchanged. Sell 20 @250: cost 4000, STCG 1000. 30 remain at cost 6000.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "corporate_actions": [
+    {
+      "id": "ca1",
+      "isin": "INE009A01021",
+      "kind": "SPLIT",
+      "ex_date": "2024-08-01",
+      "ratio_from": "1",
+      "ratio_to": "5"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "note": "Bought 29-Feb-2024: twelve calendar months end 28-Feb-2025 (clamped), so 27-Feb is short-term and 28-Feb is long-term. A 365-day rule would get this wrong.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

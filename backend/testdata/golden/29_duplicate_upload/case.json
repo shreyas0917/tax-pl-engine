@@ -1,0 +1,14 @@
+{
+  "note": "The same file supplied twice must not double-count: identical result to case 01.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    },
+    {
+      "name": "a_again.csv",
+      "account": "A"
+    }
+  ]
+}

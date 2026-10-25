@@ -1,0 +1,52 @@
+{
+  "summaries": {
+    "2025-26": {
+      "stcg": "6000",
+      "ltcg": "2000",
+      "intraday": "0",
+      "fno": "0",
+      "fno_turnover": "0",
+      "buyback_dividend": "0",
+      "buyback_exempt": "0",
+      "estimated_tax": "1200"
+    }
+  },
+  "gains": [
+    {
+      "fy": "2025-26",
+      "category": "LTCG_EQUITY",
+      "account": "A",
+      "symbol": "INFY",
+      "sale_date": "2025-06-01",
+      "acquisition_date": "2024-05-01",
+      "quantity": "10",
+      "sale_value": "12000",
+      "cost": "10000",
+      "charges": "0",
+      "gain": "2000"
+    },
+    {
+      "fy": "2025-26",
+      "category": "STCG_EQUITY",
+      "account": "A",
+      "symbol": "INFY",
+      "sale_date": "2025-06-01",
+      "acquisition_date": "2025-01-15",
+      "quantity": "5",
+      "sale_value": "6000",
+      "cost": "0",
+      "charges": "0",
+      "gain": "6000"
+    }
+  ],
+  "review": [],
+  "open_lots": [
+    {
+      "account": "A",
+      "symbol": "INFY",
+      "quantity": "5",
+      "cost": "0",
+      "acquired": "2025-01-15"
+    }
+  ]
+}

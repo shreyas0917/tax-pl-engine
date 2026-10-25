@@ -1,0 +1,10 @@
+{
+  "note": "LTCG 150000 on 22-Jul-2024 (10%) and 150000 on 23-Jul-2024 (12.5%). One annual exemption of 125000 allocated pro-rata (62500 each): tax 8750 + 10937.50 = 19687.50 (estimate).",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

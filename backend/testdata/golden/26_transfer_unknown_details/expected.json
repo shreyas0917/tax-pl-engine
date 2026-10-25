@@ -1,0 +1,20 @@
+{
+  "summaries": {
+    "2025-26": {
+      "stcg": "0",
+      "ltcg": "0",
+      "intraday": "0",
+      "fno": "0",
+      "fno_turnover": "0",
+      "buyback_dividend": "0",
+      "buyback_exempt": "0",
+      "estimated_tax": "0"
+    }
+  },
+  "gains": [],
+  "review": [
+    "MISSING_BUY_HISTORY",
+    "TRANSFER_DETAILS"
+  ],
+  "open_lots": []
+}

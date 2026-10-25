@@ -1,0 +1,42 @@
+{
+  "note": "100 INFY bought in A (Jun 2023) moved off-market to B in Jun 2024 with cost and date carried over (no transfer u/s 2(47)). B sells @150 in Sep 2024: LTCG 5000. A's transfer-out is not a sale.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    },
+    {
+      "name": "b.csv",
+      "account": "B"
+    }
+  ],
+  "extra_trades": [
+    {
+      "id": "xo",
+      "account_id": "A",
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "kind": "TRANSFER_OUT",
+      "side": "SELL",
+      "quantity": "100",
+      "price": "0",
+      "trade_date": "2024-06-01"
+    },
+    {
+      "id": "xi",
+      "account_id": "B",
+      "isin": "INE009A01021",
+      "symbol": "INFY",
+      "segment": "EQ",
+      "kind": "TRANSFER_IN",
+      "side": "BUY",
+      "quantity": "100",
+      "price": "0",
+      "trade_date": "2024-06-01",
+      "original_acquisition_date": "2023-06-01",
+      "original_cost": "10000"
+    }
+  ]
+}

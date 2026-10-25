@@ -1,0 +1,10 @@
+{
+  "note": "INFY +500 and TCS -200 on the same day; lots never mix across ISINs. Net STCG 300, tax on positive net 60.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

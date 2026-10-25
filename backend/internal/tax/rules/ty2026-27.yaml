@@ -1,0 +1,71 @@
+# Rules for Tax Year 2026-27 under the Income-tax Act, 2025 (in force from 1 April 2026).
+# Section numbers follow the 2025 Act; published mapping tables (ClearTax, Taxmann, BVACA)
+# agree on the ones used here. Finance Act 2026 (assented 30 Mar 2026) left the equity
+# rates and the Rs 1.25 lakh exemption unchanged and moved buybacks to capital gains.
+year: "2026-27"
+law: "Income-tax Act, 2025"
+year_label: "Tax Year 2026-27"
+version: 1
+equity:
+  long_term_after_months: 12
+  long_term_boundary: "on_or_after_anniversary"   # s.2(101)(b) keeps the 1961 wording, so Bharti Gupta Ramola carries over
+  periods:
+    - from: "2026-04-01"
+      to: "2027-03-31"
+      stcg_rate: "0.20"
+      ltcg_rate: "0.125"
+  ltcg_exemption: "125000"
+  ltcg_exemption_allocation: "pro_rata"
+  rebate_87a_on_ltcg: false
+grandfathering:
+  enabled: true                    # s.90(7)-(8) of the 2025 Act, no sunset
+  cutoff_acquisition_date: "2018-01-31"
+  fmv_date: "2018-01-31"
+  apply_to_bonus_shares: true
+intraday:
+  netting: "min_buy_sell_per_day"  # s.66(31) of the 2025 Act = old s.43(5)
+buyback:
+  periods:
+    - from: "2026-04-01"
+      to: "2027-03-31"
+      regime: "capital_gains"      # s.69 substituted by Finance Act 2026; s.2(40)(f) omitted
+fno:
+  turnover_method: "absolute_pnl"
+  audit_threshold: "10000000"
+  audit_threshold_low_cash: "100000000"
+  audit_low_cash_pct: "0.05"
+losses:
+  - loss: "STCL"
+    set_off_against: ["STCG", "LTCG"]
+    carry_forward_years: 8
+    carry_forward_against: ["STCG", "LTCG"]
+  - loss: "LTCL"
+    set_off_against: ["LTCG"]
+    carry_forward_years: 8
+    carry_forward_against: ["LTCG"]
+  - loss: "SPECULATIVE"
+    set_off_against: ["SPECULATIVE"]
+    carry_forward_years: 4
+    carry_forward_against: ["SPECULATIVE"]
+  - loss: "NON_SPECULATIVE_BUSINESS"
+    set_off_against: ["ANY_EXCEPT_SALARY"]
+    carry_forward_years: 8
+    carry_forward_against: ["BUSINESS"]
+references:
+  short_term_asset: "s.2(101)"
+  stcg: "s.196"
+  ltcg: "s.198"
+  grandfathering: "s.90(7)"
+  speculative: "s.66(31)"
+  audit: "s.63"
+  set_off: "s.108, s.109"
+  carry_forward: "s.111, s.112, s.113"
+  buyback: "s.69"
+sources:
+  - "https://cleartax.in/s/income-tax-act-2025-section-numbers-old-vs-new"
+  - "https://www.incometaxindia.gov.in/w/section-90-114"
+  - "https://www.taxsutra.com/lsi/act/section/print/146588"
+  - "https://taxguru.in/income-tax/buy-taxation-finance-act-2026-resettling-unsettledae.html"
+  - "https://www.tatamutualfund.com/blogs/post-budget-2026-new-tax-map-equity-investors"
+  - "https://nsearchives.nseindia.com/content/circulars/FATAX73524.pdf"
+verified_by: ""

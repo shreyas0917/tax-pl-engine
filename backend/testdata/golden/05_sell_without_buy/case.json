@@ -1,0 +1,10 @@
+{
+  "note": "A sale with no purchase history must become a review item, never a gain with zero cost.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

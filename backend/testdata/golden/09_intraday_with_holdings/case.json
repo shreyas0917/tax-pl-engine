@@ -1,0 +1,10 @@
+{
+  "note": "CA example C: hold 100 (bought 2024-04-05 @100); same day buy 50@110 and sell 80@115. 50 is intraday (+250); 30 is a delivery sale from the old lot (+450, long-term).",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

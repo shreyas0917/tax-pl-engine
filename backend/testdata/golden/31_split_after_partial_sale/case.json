@@ -1,0 +1,20 @@
+{
+  "note": "Sell 4 of 10 before a 1:5 split (+400 at 15%), then the remaining 6 become 30 at cost 6000; sell all 30 @250 (+1500 at 20%). Estimated tax 60 + 300.",
+  "fy": "2024-25",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "corporate_actions": [
+    {
+      "id": "ca1",
+      "isin": "INE009A01021",
+      "kind": "SPLIT",
+      "ex_date": "2024-08-01",
+      "ratio_from": "1",
+      "ratio_to": "5"
+    }
+  ]
+}

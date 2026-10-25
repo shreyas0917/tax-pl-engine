@@ -1,0 +1,31 @@
+{
+  "summaries": {
+    "2024-25": {
+      "stcg": "0",
+      "ltcg": "0",
+      "intraday": "0",
+      "fno": "0",
+      "fno_turnover": "0",
+      "buyback_dividend": "0",
+      "buyback_exempt": "15000",
+      "estimated_tax": "0"
+    }
+  },
+  "gains": [
+    {
+      "fy": "2024-25",
+      "category": "BUYBACK",
+      "account": "A",
+      "symbol": "INFY",
+      "sale_date": "2024-08-01",
+      "acquisition_date": "2023-05-01",
+      "quantity": "100",
+      "sale_value": "15000",
+      "cost": "10000",
+      "charges": "0",
+      "gain": "0"
+    }
+  ],
+  "review": [],
+  "open_lots": []
+}

@@ -1,0 +1,4 @@
+symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time
+INFY,INE009A01021,2024-02-29,NSE,EQ,EQ,buy,false,10,100,1068,10680,2024-02-29T10:00:00
+INFY,INE009A01021,2025-02-27,NSE,EQ,EQ,sell,false,5,200,1069,10690,2025-02-27T10:00:00
+INFY,INE009A01021,2025-02-28,NSE,EQ,EQ,sell,false,5,200,1070,10700,2025-02-28T10:00:00

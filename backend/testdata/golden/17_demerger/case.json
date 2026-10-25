@@ -1,0 +1,23 @@
+{
+  "note": "100 INFY @1000 (cost 100000). Demerger moves 30% of cost to NEWCO (1:1), acquisition date carried (s.49(2C), s.2(42A) Expl.1(g)). Sell 50 INFY @900 (cost 35000, +10000) and 100 NEWCO @400 (cost 30000, +10000); both long-term.",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "corporate_actions": [
+    {
+      "id": "ca1",
+      "isin": "INE009A01021",
+      "kind": "DEMERGER",
+      "ex_date": "2024-10-01",
+      "ratio_from": "1",
+      "ratio_to": "1",
+      "cost_split_pct": "0.30",
+      "new_isin": "INE999Z01011",
+      "new_symbol": "NEWCO"
+    }
+  ]
+}

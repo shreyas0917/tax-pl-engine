@@ -1,0 +1,85 @@
+# Rules for FY 2024-25 (AY 2025-26) under the Income-tax Act, 1961.
+# Every number here is data: business logic reads it and never hardcodes it.
+year: "2024-25"
+law: "Income-tax Act, 1961"
+year_label: "FY 2024-25 (AY 2025-26)"
+version: 1
+equity:
+  long_term_after_months: 12
+  # Delhi HC, Bharti Gupta Ramola v CIT (ITA 1234/2011, 12 Apr 2012): the acquisition date
+  # counts as held, 12 calendar months complete on the day before the anniversary, so a sale
+  # ON the anniversary is already long-term. Alternative value: "after_anniversary".
+  long_term_boundary: "on_or_after_anniversary"
+  periods:                         # rates changed mid-year: split by transfer (sale) date
+    - from: "2024-04-01"
+      to: "2024-07-22"
+      stcg_rate: "0.15"
+      ltcg_rate: "0.10"
+    - from: "2024-07-23"
+      to: "2025-03-31"
+      stcg_rate: "0.20"
+      ltcg_rate: "0.125"
+  # Finance (No.2) Act 2024 amended s.112A(2) for the whole AY 2025-26: one aggregate limit
+  # for the year, not Rs 1 lakh pre-23-Jul plus Rs 1.25 lakh post. Allocation of the
+  # exemption between the two rate buckets is not prescribed; pro_rata is used and labelled
+  # as an estimate. Alternatives: "earliest_first", "highest_rate_first".
+  ltcg_exemption: "125000"
+  ltcg_exemption_allocation: "pro_rata"
+  report_split_by_date: "2024-07-23"   # ITR-2/3 Schedule 112A reports pre/post rows separately
+  rebate_87a_on_ltcg: false
+grandfathering:
+  enabled: true
+  cutoff_acquisition_date: "2018-01-31"
+  fmv_date: "2018-01-31"
+  apply_to_bonus_shares: true      # s.55(2)(ac) has no bonus carve-out; ITAT Mumbai, Ramesh Jaisinghani (Oct 2025)
+intraday:
+  netting: "min_buy_sell_per_day"  # s.43(5): same-day squared-off quantity is speculative
+buyback:
+  # Three regimes apply by the buyback date; the engine picks the one covering the sale date.
+  periods:
+    - from: "2024-04-01"
+      to: "2024-09-30"
+      regime: "exempt_115qa"       # company paid buyback tax; shareholder exempt u/s 10(34A)
+    - from: "2024-10-01"
+      to: "2025-03-31"
+      regime: "deemed_dividend"    # s.2(22)(f): proceeds are dividend; s.46A: cost becomes a capital loss
+fno:
+  turnover_method: "absolute_pnl"  # ICAI Guidance Note on Tax Audit (2023), para 5.10(b)
+  audit_threshold: "10000000"
+  audit_threshold_low_cash: "100000000"  # when cash receipts and payments are each <= 5%
+  audit_low_cash_pct: "0.05"
+losses:
+  - loss: "STCL"
+    set_off_against: ["STCG", "LTCG"]
+    carry_forward_years: 8
+    carry_forward_against: ["STCG", "LTCG"]
+  - loss: "LTCL"
+    set_off_against: ["LTCG"]
+    carry_forward_years: 8
+    carry_forward_against: ["LTCG"]
+  - loss: "SPECULATIVE"
+    set_off_against: ["SPECULATIVE"]
+    carry_forward_years: 4
+    carry_forward_against: ["SPECULATIVE"]
+  - loss: "NON_SPECULATIVE_BUSINESS"
+    set_off_against: ["ANY_EXCEPT_SALARY"]
+    carry_forward_years: 8
+    carry_forward_against: ["BUSINESS"]
+references:
+  short_term_asset: "s.2(42A)"
+  stcg: "s.111A"
+  ltcg: "s.112A"
+  grandfathering: "s.55(2)(ac)"
+  speculative: "s.43(5)"
+  audit: "s.44AB"
+  set_off: "s.70, s.71"
+  carry_forward: "s.72, s.73, s.74"
+  buyback: "s.115QA / s.2(22)(f) / s.46A"
+sources:
+  - "https://cleartax.in/s/long-term-capital-gains-on-shares"
+  - "https://www.taxbuddy.com/blog/new-capital-gain-tax"
+  - "https://delhihighcourt.nic.in/app/downloadOrderbByDate/ITA/1234/2011/12-04-2012"
+  - "https://incometaxindia.gov.in/communications/circular/910110000000000355.htm"
+  - "https://treelife.in/taxation/buyback-tax-in-india/"
+  - "https://www.taxmann.com/post/blog/tax-audit-how-to-calculate-the-turnover-in-the-case-of-derivatives/"
+verified_by: ""

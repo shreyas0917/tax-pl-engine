@@ -1,0 +1,10 @@
+{
+  "note": "Sales on 31 Mar 2025 and 1 Apr 2025 fall in different years; the 1 Apr sale is exactly 12 months after purchase so it is long-term.",
+  "fy": "",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

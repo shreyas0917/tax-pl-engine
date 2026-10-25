@@ -1,0 +1,20 @@
+{
+  "note": "10 @1000 bought May 2024; 1:1 bonus Jan 2025 gives 10 more at nil cost dated 15-Jan-2025. Sell 15 @1200 in Jun 2025: 10 from the original lot (LTCG 2000), 5 bonus (STCG 6000, cost nil).",
+  "fy": "2025-26",
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ],
+  "corporate_actions": [
+    {
+      "id": "ca1",
+      "isin": "INE009A01021",
+      "kind": "BONUS",
+      "ex_date": "2025-01-15",
+      "ratio_from": "1",
+      "ratio_to": "1"
+    }
+  ]
+}
