@@ -76,7 +76,16 @@ Pure engine, in-process, single machine (Windows 11, Go 1.26). Full table and me
 
 ## Run locally
 
-Needs Docker Desktop, Go 1.26+ and Node 24+.
+**Option 1: everything in Docker** (needs only Docker Desktop):
+
+```sh
+cp .env.example .env
+make app         # builds api, worker and web images; runs migrations; starts Postgres and Redis
+```
+
+Open http://localhost:8081. `make app-down` stops the containers and keeps the data.
+
+**Option 2: dev workflow** (Go 1.26+ and Node 24+ on the host, hot reload):
 
 ```sh
 cp .env.example .env
@@ -87,7 +96,7 @@ make worker      # terminal 2
 make web         # terminal 3: http://localhost:5173
 ```
 
-`make check` runs lint plus every engine test (no Docker needed); `make test-integration` runs the Postgres-backed tests. On Windows use Git Bash; `make` comes from `winget install GnuWin32.Make` (add `C:\Program Files (x86)\GnuWin32\bin` to PATH) or run the Makefile commands directly.
+`make check` runs lint plus every engine test (no Docker needed); `make test-integration` runs the Postgres-backed tests. On Windows use Git Bash; `make` comes from `winget install GnuWin32\bin` to PATH) or run the Makefile commands directly.
 
 Try the engine without the server:
 

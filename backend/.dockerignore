@@ -1,0 +1,10 @@
+.env
+.env.*
+*.exe
+*.prof
+*.out
+out.json
+testdata/private/
+.data/
+node_modules/
+dist/

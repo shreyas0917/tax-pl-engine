@@ -24,3 +24,6 @@ Thumbs.db
 # frontend
 frontend/playwright-report/
 frontend/test-results/
+
+*.exe
+backend/bin/

@@ -4,12 +4,20 @@ SHELL := /bin/sh
 export
 
 GO        ?= go
-GOBIN     ?= $(shell $(GO) env GOPATH)/bin
+GOBIN     ?= $(subst \,/,$(shell $(GO) env GOPATH))/bin
 BACKEND   := backend
 FRONTEND  := frontend
 DATABASE_URL ?= postgres://taxpl:taxpl_dev_password@localhost:5432/taxpl?sslmode=disable
 
-.PHONY: up down reset-db migrate migrate-down sqlc api worker web test test-golden test-integration lint seed bench check hooks tools fmt
+.PHONY: app app-down up down reset-db migrate migrate-down sqlc api worker web test test-golden test-integration lint seed bench check hooks tools fmt
+
+## Whole app in Docker (Postgres, Redis, migrations, api, worker, web on :8081)
+app:           ## build and start everything
+	docker compose --profile app up -d --build
+	@echo "open http://localhost:$${WEB_PORT:-8081}"
+
+app-down:      ## stop the app containers (keeps data)
+	docker compose --profile app down
 
 ## Infrastructure
 up:            ## start Postgres + Redis
@@ -63,7 +71,8 @@ test-integration: ## tests that need Docker (testcontainers)
 
 lint:          ## golangci-lint + no-float guard
 	cd $(BACKEND) && $(GO) vet ./...
-	cd $(BACKEND) && ($(GOBIN)/golangci-lint run ./... || (echo "golangci-lint not installed: run make tools" && exit 1))
+	@test -x $(GOBIN)/golangci-lint || (echo "golangci-lint not installed: run make tools" && exit 1)
+	cd $(BACKEND) && $(GOBIN)/golangci-lint run --timeout 20m ./...
 
 bench:         ## benchmarks (results in docs/benchmarks.md)
 	cd $(BACKEND) && $(GO) test ./internal/matcher/... ./internal/pipeline/... -run '^$$' -bench . -benchmem
