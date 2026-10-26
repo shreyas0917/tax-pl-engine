@@ -41,6 +41,7 @@ type caseFile struct {
 	OpeningLots      []domain.Lot             `json:"opening_lots"`
 	ExtraTrades      []domain.Trade           `json:"extra_trades"`
 	AsOf             domain.Date              `json:"as_of"`
+	EstimateCharges  bool                     `json:"estimate_charges"`
 	Note             string                   `json:"note"`
 }
 
@@ -111,7 +112,7 @@ func loadCase(t *testing.T, dir string) (pipeline.Request, caseFile) {
 	var cf caseFile
 	require.NoError(t, json.Unmarshal(b, &cf))
 	req := pipeline.Request{FY: cf.FY, Instruments: map[string]domain.Instrument{}, SymbolToISIN: cf.SymbolToISIN,
-		CorporateActions: cf.CorporateActions, OpeningLots: cf.OpeningLots, ExtraTrades: cf.ExtraTrades, AsOf: cf.AsOf}
+		CorporateActions: cf.CorporateActions, OpeningLots: cf.OpeningLots, ExtraTrades: cf.ExtraTrades, AsOf: cf.AsOf, EstimateCharges: cf.EstimateCharges}
 	for _, inst := range cf.Instruments {
 		req.Instruments[inst.ISIN] = inst
 	}

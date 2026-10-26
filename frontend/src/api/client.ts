@@ -61,7 +61,7 @@ export function refreshAccessToken(baseFetch: typeof fetch = fetch, refreshUrl =
   if (refreshInFlight) return refreshInFlight
   refreshInFlight = (async () => {
     try {
-      const res = await baseFetch(refreshUrl, { method: 'POST', credentials: 'include' })
+      const res = await baseFetch(new Request(refreshUrl, { method: 'POST', credentials: 'include' }))
       if (!res.ok) {
         sessionStore.clear()
         return null
@@ -97,7 +97,8 @@ export function createAuthFetch(opts: AuthFetchOptions = {}): typeof fetch {
     const send = (token: string | null) => {
       const headers = new Headers(request.headers)
       if (token && !auth) headers.set('Authorization', `Bearer ${token}`)
-      return baseFetch(new Request(request.clone(), { headers, credentials: auth ? 'include' : 'same-origin' }))
+      const init: RequestInit & { duplex?: 'half' } = { headers, credentials: auth ? 'include' : 'same-origin', duplex: 'half' }
+      return baseFetch(new Request(request.clone(), init))
     }
 
     const first = await send(sessionStore.getToken())

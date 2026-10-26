@@ -37,7 +37,8 @@ import (
 // These tests need Docker. Run with: TAXPL_INTEGRATION=1 go test ./internal/jobs/ -run Integration -v
 
 type env struct {
-	pool *pgxpool.Pool
+	pool *pgxpool.Pool // app role, RLS enforced
+	sys  *pgxpool.Pool // superuser, bypasses RLS
 	q    *store.Queries
 	svc  *jobs.Service
 	dir  string
@@ -49,16 +50,19 @@ func setup(t *testing.T) *env {
 		t.Skip("set TAXPL_INTEGRATION=1 to run Docker-backed tests")
 	}
 	ctx := context.Background()
-	// Docker Desktop on Windows often cannot run the Ryuk reaper; containers are terminated by t.Cleanup instead.
-	if os.Getenv("TESTCONTAINERS_RYUK_DISABLED") == "" {
-		t.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
+	url := os.Getenv("TAXPL_TEST_DATABASE_URL")
+	if url == "" {
+		// Docker Desktop on Windows often cannot run the Ryuk reaper; containers are terminated by t.Cleanup instead.
+		if os.Getenv("TESTCONTAINERS_RYUK_DISABLED") == "" {
+			t.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
+		}
+		pg, err := tcpostgres.Run(ctx, "postgres:16-alpine", tcpostgres.WithDatabase("taxpl"), tcpostgres.WithUsername("taxpl"), tcpostgres.WithPassword("taxpl"),
+			testcontainers.WithWaitStrategy(wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(6*time.Minute)))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = pg.Terminate(ctx) })
+		url, err = pg.ConnectionString(ctx, "sslmode=disable")
+		require.NoError(t, err)
 	}
-	pg, err := tcpostgres.Run(ctx, "postgres:16-alpine", tcpostgres.WithDatabase("taxpl"), tcpostgres.WithUsername("taxpl"), tcpostgres.WithPassword("taxpl"),
-		testcontainers.WithWaitStrategy(wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(2*time.Minute)))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pg.Terminate(ctx) })
-	url, err := pg.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
 
 	sqlDB, err := sql.Open("pgx", url)
 	require.NoError(t, err)
@@ -66,24 +70,32 @@ func setup(t *testing.T) *env {
 	require.NoError(t, goose.Up(sqlDB, filepath.Join("..", "..", "db", "migrations")))
 	require.NoError(t, sqlDB.Close())
 
-	pool, err := store.NewPool(ctx, url)
+	sys, err := store.NewPool(ctx, url)
+	require.NoError(t, err)
+	t.Cleanup(sys.Close)
+	pool, err := store.NewPool(ctx, url, store.PoolOptions{AppRole: "taxpl_app"})
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	require.NoError(t, jobs.Migrate(ctx, pool))
+	require.NoError(t, jobs.Migrate(ctx, sys))
+	jobs.Queue = "integration-test" // never served by a worker
 	client, err := jobs.NewInsertOnlyClient(pool)
 	require.NoError(t, err)
 	dir := t.TempDir()
 	bs, err := blob.NewLocal(dir)
 	require.NoError(t, err)
-	svc := &jobs.Service{Pool: pool, Blob: bs, Log: slog.New(slog.NewTextHandler(os.Stderr, nil)), River: client, RawTTL: 24 * time.Hour}
-	return &env{pool: pool, q: store.New(pool), svc: svc, dir: dir}
+	svc := &jobs.Service{Pool: pool, Sys: sys, Blob: bs, Log: slog.New(slog.NewTextHandler(os.Stderr, nil)), River: client, RawTTL: 24 * time.Hour}
+	return &env{pool: pool, sys: sys, q: store.New(sys), svc: svc, dir: dir}
 }
 
 var _ = stdlib.GetDefaultDriver
 
+// user creates a test user with a per-run unique email and removes it (and everything it
+// owns, by cascade) when the test ends, so the tests can share a long-lived database.
 func (e *env) user(t *testing.T, email string) string {
+	email = fmt.Sprintf("%d-%s", time.Now().UnixNano(), email)
 	u, err := e.q.CreateUser(context.Background(), store.CreateUserParams{Email: email, PasswordHash: "x"})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = e.q.DeleteUser(context.Background(), u.ID) })
 	return u.ID
 }
 
@@ -317,6 +329,9 @@ func canonical(t *testing.T, e *env, uid string) string {
 }
 
 func TestIntegrationPurgeAndDelete(t *testing.T) {
+	if os.Getenv("TAXPL_TEST_DATABASE_URL") != "" {
+		t.Skip("purge is global; run this one against a throwaway container")
+	}
 	e := setup(t)
 	ctx := context.Background()
 	uid := e.user(t, "purge@example.com")
@@ -348,10 +363,59 @@ func TestIntegrationPurgeAndDelete(t *testing.T) {
 	n, _ = e.q.CountTrades(ctx, uid)
 	require.EqualValues(t, 0, n)
 	var remaining int
-	require.NoError(t, e.pool.QueryRow(ctx, "SELECT count(*) FROM gains WHERE user_id = $1", uid).Scan(&remaining))
+	require.NoError(t, e.sys.QueryRow(ctx, "SELECT count(*) FROM gains WHERE user_id = $1", uid).Scan(&remaining))
 	require.Equal(t, 0, remaining)
 	var audits int
-	require.NoError(t, e.pool.QueryRow(ctx, "SELECT count(*) FROM audit_log WHERE user_id = $1 AND action = 'delete_all_data'", uid).Scan(&audits))
+	require.NoError(t, e.sys.QueryRow(ctx, "SELECT count(*) FROM audit_log WHERE user_id = $1 AND action = 'delete_all_data'", uid).Scan(&audits))
 	require.Equal(t, 1, audits, "the deletion itself is audited")
 	_ = json.Marshal
+}
+
+// TestIntegrationRowLevelSecurity: with app.user_id set to A, user B's rows are invisible
+// and cannot be written, even though the role has table-level privileges.
+func TestIntegrationRowLevelSecurity(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	a := e.user(t, "rls-a@example.com")
+	b := e.user(t, "rls-b@example.com")
+	acctA := e.account(t, a, "Main")
+	acctB := e.account(t, b, "Main")
+	upA, jobA := e.upload(t, a, acctA, "a.csv", csvA())
+	e.process(t, a, upA, jobA)
+	upB, jobB := e.upload(t, b, acctB, "b.csv", csvB())
+	e.process(t, b, upB, jobB)
+	e.recompute(t, a)
+	e.recompute(t, b)
+
+	var seen int64
+	require.NoError(t, store.WithUserTx(ctx, e.pool, a, func(_ pgx.Tx, q *store.Queries) error {
+		var err error
+		seen, err = q.CountTrades(ctx, b)
+		return err
+	}))
+	require.EqualValues(t, 0, seen, "A cannot count B's trades")
+	require.NoError(t, store.WithUserTx(ctx, e.pool, a, func(_ pgx.Tx, q *store.Queries) error {
+		rows, err := q.ListTradesForUser(ctx, b)
+		require.Empty(t, rows)
+		return err
+	}))
+	// Without any user context nothing is visible at all.
+	require.NoError(t, store.WithTx(ctx, e.pool, func(_ pgx.Tx, q *store.Queries) error {
+		rows, err := q.ListTradesForUser(ctx, a)
+		require.Empty(t, rows)
+		return err
+	}))
+	// Writing into another user's space is rejected by the policy.
+	err := store.WithUserTx(ctx, e.pool, a, func(_ pgx.Tx, q *store.Queries) error {
+		_, err := q.CreateAccount(ctx, store.CreateAccountParams{UserID: b, Broker: "zerodha", Nickname: "Injected"})
+		return err
+	})
+	require.Error(t, err, "insert with a foreign user_id violates the policy")
+	// The superuser pool still sees everything (used by purge and tests).
+	n, err := e.q.CountTrades(ctx, b)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, n)
+	// The app role cannot alter the audit log.
+	_, err = e.pool.Exec(ctx, "DELETE FROM audit_log")
+	require.Error(t, err, "audit_log is append-only for the app role")
 }

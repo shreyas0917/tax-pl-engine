@@ -51,7 +51,7 @@ func isTerminal(state string) bool {
 }
 
 func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListRecentJobs(r.Context(), store.ListRecentJobsParams{UserID: UserID(r.Context()), Limit: 50})
+	rows, err := s.qry(r).ListRecentJobs(r.Context(), store.ListRecentJobsParams{UserID: UserID(r.Context()), Limit: 50})
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -64,12 +64,12 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
-	j, err := s.q.GetJob(r.Context(), store.GetJobParams{ID: chi.URLParam(r, "id"), UserID: UserID(r.Context())})
+	j, err := s.qry(r).GetJob(r.Context(), store.GetJobParams{ID: chi.URLParam(r, "id"), UserID: UserID(r.Context())})
 	if err != nil {
 		writeProblem(w, r, err)
 		return
 	}
-	events, _ := s.q.ListJobEvents(r.Context(), store.ListJobEventsParams{JobID: j.ID, ID: 0})
+	events, _ := s.qry(r).ListJobEvents(r.Context(), store.ListJobEventsParams{JobID: j.ID, ID: 0})
 	writeJSON(w, 200, map[string]any{"job": jobViewOf(j), "events": eventViews(events)})
 }
 
@@ -95,11 +95,12 @@ func eventViews(es []store.JobEvent) []eventView {
 
 // jobEvents streams job_events rows as Server-Sent Events, resuming from Last-Event-ID.
 func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
-	j, err := s.q.GetJob(r.Context(), store.GetJobParams{ID: chi.URLParam(r, "id"), UserID: UserID(r.Context())})
+	j, err := s.qry(r).GetJob(r.Context(), store.GetJobParams{ID: chi.URLParam(r, "id"), UserID: UserID(r.Context())})
 	if err != nil {
 		writeProblem(w, r, err)
 		return
 	}
+	releaseUserConn(r) // do not hold a pooled connection for the life of the stream
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeProblem(w, r, errors.New("streaming unsupported"))
@@ -122,7 +123,7 @@ func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 	defer ticker.Stop()
 	deadline := time.After(10 * time.Minute)
 	for {
-		events, err := s.q.ListJobEvents(r.Context(), store.ListJobEventsParams{JobID: j.ID, ID: last})
+		events, err := s.sys.ListJobEvents(r.Context(), store.ListJobEventsParams{JobID: j.ID, ID: last})
 		if err != nil {
 			return
 		}
@@ -174,7 +175,7 @@ func (s *Server) listReviewItems(w http.ResponseWriter, r *http.Request) {
 		}
 		status = &st
 	}
-	rows, err := s.q.ListReviewItems(r.Context(), store.ListReviewItemsParams{UserID: UserID(r.Context()), Status: status})
+	rows, err := s.qry(r).ListReviewItems(r.Context(), store.ListReviewItemsParams{UserID: UserID(r.Context()), Status: status})
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -218,7 +219,7 @@ func (s *Server) resolveReviewItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := UserID(r.Context())
-	item, err := s.q.GetReviewItem(r.Context(), store.GetReviewItemParams{ID: chi.URLParam(r, "id"), UserID: uid})
+	item, err := s.qry(r).GetReviewItem(r.Context(), store.GetReviewItemParams{ID: chi.URLParam(r, "id"), UserID: uid})
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -232,7 +233,7 @@ func (s *Server) resolveReviewItem(w http.ResponseWriter, r *http.Request) {
 	resolution := map[string]any{}
 	status := "resolved"
 
-	err = store.WithTx(r.Context(), s.pool, func(tx pgx.Tx, q *store.Queries) error {
+	err = store.WithTx(r.Context(), s.db(r), func(tx pgx.Tx, q *store.Queries) error {
 		switch {
 		case body.Dismiss:
 			status = "dismissed"
@@ -374,7 +375,7 @@ func (s *Server) addManualTrade(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := UserID(r.Context())
 	fields := map[string]string{}
-	if _, err := s.q.GetAccount(r.Context(), store.GetAccountParams{ID: body.AccountID, UserID: uid}); err != nil {
+	if _, err := s.qry(r).GetAccount(r.Context(), store.GetAccountParams{ID: body.AccountID, UserID: uid}); err != nil {
 		fields["account_id"] = "no such account"
 	}
 	body.ISIN = strings.ToUpper(strings.TrimSpace(body.ISIN))
@@ -427,7 +428,7 @@ func (s *Server) addManualTrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.ID = domain.SourceRowHash("manual", body.AccountID, string(kind), string(side), t.ISIN, qty.String(), price.String(), date.String())
-	err = store.WithTx(r.Context(), s.pool, func(tx pgx.Tx, q *store.Queries) error {
+	err = store.WithTx(r.Context(), s.db(r), func(tx pgx.Tx, q *store.Queries) error {
 		raw, _ := json.Marshal(map[string]string{"source": "manual"})
 		p := store.InsertManualTradeParams{UserID: uid, AccountID: body.AccountID, SourceRowHash: t.ID, Isin: t.ISIN, Symbol: t.Symbol, Segment: string(t.Segment), Kind: string(kind), Side: string(side),
 			Quantity: qty, Price: price, TradeDate: date.Time(), Raw: raw}

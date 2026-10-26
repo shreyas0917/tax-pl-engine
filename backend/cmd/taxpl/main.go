@@ -76,13 +76,14 @@ func calculate(args []string) error {
 	out := fs.String("out", "out.json", "output JSON path")
 	ref := fs.String("ref", "", "reference data JSON (instruments, corporate actions, opening lots)")
 	broker := fs.String("broker", "", "force a broker parser instead of auto-detecting")
+	estimate := fs.Bool("estimate-charges", false, "estimate brokerage, STT and levies from the dated schedule when the tradebook has none (labelled estimated)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() == 0 {
 		return fmt.Errorf("no input files")
 	}
-	req := pipeline.Request{FY: *fy, Instruments: map[string]domain.Instrument{}}
+	req := pipeline.Request{FY: *fy, Instruments: map[string]domain.Instrument{}, EstimateCharges: *estimate}
 	if *ref != "" {
 		b, err := os.ReadFile(*ref)
 		if err != nil {

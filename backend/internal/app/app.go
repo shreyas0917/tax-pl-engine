@@ -25,7 +25,8 @@ import (
 type App struct {
 	Cfg   config.Config
 	Log   *slog.Logger
-	Pool  *pgxpool.Pool
+	Pool  *pgxpool.Pool // user-facing: SET ROLE app role, RLS enforced
+	Sys   *pgxpool.Pool // system: cross-user maintenance, migrations and authentication lookups
 	Blob  blob.Store
 	Redis *redis.Client
 	Jobs  *jobs.Service
@@ -50,9 +51,17 @@ func New(ctx context.Context) (*App, error) {
 	log := Logger(cfg)
 	slog.SetDefault(log)
 
-	pool, err := store.NewPool(ctx, cfg.DatabaseURL)
+	pool, err := store.NewPool(ctx, cfg.DatabaseURL, store.PoolOptions{AppRole: cfg.DBAppRole})
 	if err != nil {
 		return nil, err
+	}
+	sys, err := store.NewPool(ctx, cfg.DatabaseURL, store.PoolOptions{AppRole: cfg.DBSystemRole, MaxConns: 4})
+	if err != nil {
+		log.Warn("system role unavailable; using the login role for maintenance", "err", err)
+		if sys, err = store.NewPool(ctx, cfg.DatabaseURL, store.PoolOptions{MaxConns: 4}); err != nil {
+			pool.Close()
+			return nil, err
+		}
 	}
 	var bs blob.Store
 	switch cfg.BlobDriver {
@@ -79,8 +88,8 @@ func New(ctx context.Context) (*App, error) {
 			}
 		}
 	}
-	js := &jobs.Service{Pool: pool, Blob: bs, Log: log, RawTTL: cfg.RawFileTTL, ReportWriters: ReportWriters()}
-	return &App{Cfg: cfg, Log: log, Pool: pool, Blob: bs, Redis: rdb, Jobs: js}, nil
+	js := &jobs.Service{Pool: pool, Sys: sys, Blob: bs, Log: log, RawTTL: cfg.RawFileTTL, ReportWriters: ReportWriters()}
+	return &App{Cfg: cfg, Log: log, Pool: pool, Sys: sys, Blob: bs, Redis: rdb, Jobs: js}, nil
 }
 
 // ReportWriters lists the available report formats.
@@ -100,5 +109,6 @@ func (a *App) Close() {
 	if a.Redis != nil {
 		_ = a.Redis.Close()
 	}
+	a.Sys.Close()
 	a.Pool.Close()
 }

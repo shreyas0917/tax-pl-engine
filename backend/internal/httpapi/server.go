@@ -23,8 +23,9 @@ import (
 type Server struct {
 	cfg    config.Config
 	log    *slog.Logger
-	pool   *pgxpool.Pool
-	q      *store.Queries
+	pool   *pgxpool.Pool // user-facing pool (RLS role)
+	sysDB  *pgxpool.Pool // authentication lookups and health checks
+	sys    *store.Queries
 	blob   blob.Store
 	jobs   *jobs.Service
 	tokens *auth.Tokens
@@ -36,8 +37,11 @@ type Server struct {
 }
 
 // New builds the server. rdb may be nil (rate limits and idempotency fall back to memory).
-func New(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, bs blob.Store, js *jobs.Service, rdb *redis.Client) *Server {
-	return &Server{cfg: cfg, log: log, pool: pool, q: store.New(pool), blob: bs, jobs: js, rdb: rdb,
+func New(cfg config.Config, log *slog.Logger, pool, sysPool *pgxpool.Pool, bs blob.Store, js *jobs.Service, rdb *redis.Client) *Server {
+	if sysPool == nil {
+		sysPool = pool
+	}
+	return &Server{cfg: cfg, log: log, pool: pool, sysDB: sysPool, sys: store.New(sysPool), blob: bs, jobs: js, rdb: rdb,
 		tokens: auth.NewTokens(cfg.JWTSecret, cfg.AccessTokenTTL), idemLocal: map[string]idemRecord{}, now: time.Now}
 }
 
@@ -98,6 +102,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/gains/{id}/explain", s.explainGain)
 			r.Get("/trades", s.listTrades)
 			r.Get("/holdings", s.listHoldings)
+			r.Post("/holdings/reconcile", s.reconcileHoldings)
 
 			r.Post("/trades/manual", s.addManualTrade)
 
@@ -118,7 +123,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	out := map[string]string{"database": "ok", "redis": "not configured"}
 	status := 200
-	if err := s.pool.Ping(ctx); err != nil {
+	if err := s.sysDB.Ping(ctx); err != nil {
 		out["database"] = "unreachable"
 		status = 503
 	}

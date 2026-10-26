@@ -2,7 +2,13 @@
 
 Consolidates tradebooks from several Indian brokers (Zerodha, Groww, Upstox, Angel One) into one FIFO-matched, fully explained capital-gains and business-income report for the ITR.
 
-> **Status:** Phase 2 complete: REST API, Postgres schema, River job pipeline, four broker parsers, Docker-backed integration tests. Phase 3 (frontend, Excel/PDF reports) is next. See [TAXPL_BUILD_SPEC.md](TAXPL_BUILD_SPEC.md) for the full build plan.
+> **Status:** Phases 0-4 built: pure engine, REST API, River pipeline, four broker parsers, React frontend with the Explain drawer, Excel/PDF reports, row-level security, charge estimation, holdings reconciliation, and a first benchmark. Phase 5 (benchmark optimisation, final polish) is in progress. See [TAXPL_BUILD_SPEC.md](TAXPL_BUILD_SPEC.md) for the full plan.
+
+![Dashboard](frontend/e2e/screenshots/dashboard-light.png)
+
+| Gains table | Explain drawer ("why this number?") |
+|---|---|
+| ![Gains](frontend/e2e/screenshots/gains.png) | ![Explain](frontend/e2e/screenshots/explain-drawer.png) |
 
 ## The problem
 
@@ -20,7 +26,7 @@ Traders in India commonly use two or three broker apps. Each gives its own tax P
 
 ## How correctness is proven
 
-- **34 golden cases** in `backend/testdata/golden/`, each with a hand-computed `expected.json` and a note explaining the arithmetic. See [docs/edge-cases.md](docs/edge-cases.md).
+- **35 golden cases** in `backend/testdata/golden/`, each with a hand-computed `expected.json` and a note explaining the arithmetic. See [docs/edge-cases.md](docs/edge-cases.md).
 - **Property tests** (`pgregory.net/rapid`) on the matcher: never sells more than bought, lot quantities and costs never negative, cost is conserved to the paisa, FIFO order within a sale, intraday quantity equals min(buy, sell), results independent of input order, accounts independent of each other.
 - **Holding-period property test**: the long-term rule is monotonic and agrees with day counts away from the boundary; the boundary itself is pinned by golden cases 04 and 32.
 - **Replay**: every golden case runs twice and asserts a byte-identical report checksum.
@@ -28,6 +34,10 @@ Traders in India commonly use two or three broker apps. Each gives its own tax P
 - **Rules are data with sources**: [docs/tax-rules.md](docs/tax-rules.md) lists every rule, its statutory or practitioner source and the test that proves it. Each rules file has a `verified_by` field for the CA's sign-off.
 - **Reliability is tested against a real Postgres** (testcontainers): uploading the same file twice adds nothing; a worker interrupted mid-recompute leaves no partial state and the retry completes; three uploads processed concurrently equal three processed one by one; raw files are purged after the TTL while trades stay; "delete my data" removes every row and blob. Run with `make test-integration`.
 - **API contract first**: [backend/api/openapi.yaml](backend/api/openapi.yaml) (OpenAPI 3.1, lint-clean) is the single source for the generated frontend types.
+- **Tenant isolation is tested**: Postgres row-level security is forced on every user-owned table; `TestIntegrationRowLevelSecurity` proves one user cannot read, count or write another user's rows and that the audit log is append-only.
+- **Holdings reconciliation**: upload the broker's current holdings file and the engine names every difference against its open lots (missing history, missing sale, cost mismatch), so gaps are found before filing.
+- **Frontend e2e** (Playwright): register, upload two broker files, watch the pipeline over SSE, open the Explain drawer, resolve a review item, generate and download an Excel report.
+- **Benchmarks**: [docs/benchmarks.md](docs/benchmarks.md). 100,000 trades match in 3.6 s and run the full pipeline in 5.9 s in-process.
 
 ## Try the CLI
 

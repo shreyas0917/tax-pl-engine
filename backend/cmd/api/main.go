@@ -33,7 +33,7 @@ func run() error {
 		return err
 	}
 	defer a.Close()
-	if err := jobs.Migrate(ctx, a.Pool); err != nil {
+	if err := jobs.Migrate(ctx, a.Sys); err != nil {
 		return fmt.Errorf("river migrate: %w", err)
 	}
 	client, err := jobs.NewInsertOnlyClient(a.Pool)
@@ -42,7 +42,7 @@ func run() error {
 	}
 	a.Jobs.River = client
 
-	srv := httpapi.New(a.Cfg, a.Log, a.Pool, a.Blob, a.Jobs, a.Redis)
+	srv := httpapi.New(a.Cfg, a.Log, a.Pool, a.Sys, a.Blob, a.Jobs, a.Redis)
 	httpServer := &http.Server{Addr: a.Cfg.HTTPAddr, Handler: srv.Router(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, WriteTimeout: 15 * time.Minute, IdleTimeout: time.Minute}
 	go func() {
 		a.Log.Info("api listening", "addr", a.Cfg.HTTPAddr, "env", a.Cfg.AppEnv, "blob", a.Cfg.BlobDriver)

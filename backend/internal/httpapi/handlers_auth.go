@@ -56,7 +56,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, err)
 		return
 	}
-	u, err := s.q.CreateUser(r.Context(), store.CreateUserParams{Email: email, PasswordHash: hash})
+	u, err := s.qry(r).CreateUser(r.Context(), store.CreateUserParams{Email: email, PasswordHash: hash})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -66,7 +66,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, err)
 		return
 	}
-	_ = s.q.InsertAudit(r.Context(), store.InsertAuditParams{UserID: &u.ID, Entity: "user", EntityID: u.ID, Action: "register"})
+	_ = s.qry(r).InsertAudit(r.Context(), store.InsertAuditParams{UserID: &u.ID, Entity: "user", EntityID: u.ID, Action: "register"})
 	s.issueSession(w, r, u, http.StatusCreated)
 }
 
@@ -81,7 +81,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, unauthorized(auth.ErrBadCredentials.Error()))
 		return
 	}
-	u, err := s.q.GetUserByEmail(r.Context(), email)
+	u, err := s.qry(r).GetUserByEmail(r.Context(), email)
 	if err != nil || !auth.CheckPassword(u.PasswordHash, c.Password) {
 		// Constant-ish time: hash compare already ran when the user exists.
 		writeProblem(w, r, unauthorized(auth.ErrBadCredentials.Error()))
@@ -101,7 +101,7 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, u store.Us
 		writeProblem(w, r, err)
 		return
 	}
-	if _, err := s.q.CreateRefreshToken(r.Context(), store.CreateRefreshTokenParams{UserID: u.ID, TokenHash: hash, ExpiresAt: s.now().Add(s.cfg.RefreshTTL)}); err != nil {
+	if _, err := s.qry(r).CreateRefreshToken(r.Context(), store.CreateRefreshTokenParams{UserID: u.ID, TokenHash: hash, ExpiresAt: s.now().Add(s.cfg.RefreshTTL)}); err != nil {
 		writeProblem(w, r, err)
 		return
 	}
@@ -121,18 +121,18 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hash := auth.HashToken(c.Value)
-	rt, err := s.q.GetRefreshToken(r.Context(), hash)
+	rt, err := s.qry(r).GetRefreshToken(r.Context(), hash)
 	if err != nil {
 		writeProblem(w, r, unauthorized("refresh token invalid or expired"))
 		return
 	}
-	u, err := s.q.GetUser(r.Context(), rt.UserID)
+	u, err := s.qry(r).GetUser(r.Context(), rt.UserID)
 	if err != nil {
 		writeProblem(w, r, unauthorized("user no longer exists"))
 		return
 	}
 	// Rotate: revoke the old token, issue a new pair.
-	if err := s.q.RevokeRefreshToken(r.Context(), hash); err != nil {
+	if err := s.qry(r).RevokeRefreshToken(r.Context(), hash); err != nil {
 		writeProblem(w, r, err)
 		return
 	}
@@ -141,21 +141,21 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(refreshCookie); err == nil && c.Value != "" {
-		_ = s.q.RevokeRefreshToken(r.Context(), auth.HashToken(c.Value))
+		_ = s.qry(r).RevokeRefreshToken(r.Context(), auth.HashToken(c.Value))
 	}
 	s.setRefreshCookie(w, "", time.Unix(0, 0))
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	u, err := s.q.GetUser(r.Context(), UserID(r.Context()))
+	u, err := s.qry(r).GetUser(r.Context(), UserID(r.Context()))
 	if err != nil {
 		writeProblem(w, r, err)
 		return
 	}
-	accounts, _ := s.q.ListAccounts(r.Context(), u.ID)
-	trades, _ := s.q.CountTrades(r.Context(), u.ID)
-	open, _ := s.q.CountOpenReviewItems(r.Context(), u.ID)
+	accounts, _ := s.qry(r).ListAccounts(r.Context(), u.ID)
+	trades, _ := s.qry(r).CountTrades(r.Context(), u.ID)
+	open, _ := s.qry(r).CountOpenReviewItems(r.Context(), u.ID)
 	writeJSON(w, 200, map[string]any{"user": userView{ID: u.ID, Email: u.Email, CreatedAt: u.CreatedAt}, "accounts": len(accounts),
 		"trades": trades, "open_review_items": open, "pan_on_file": u.PanHash != nil})
 }
@@ -169,7 +169,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, err)
 		return
 	}
-	u, err := s.q.GetUser(r.Context(), UserID(r.Context()))
+	u, err := s.qry(r).GetUser(r.Context(), UserID(r.Context()))
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -187,12 +187,12 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, err)
 		return
 	}
-	if err := s.q.UpdatePassword(r.Context(), store.UpdatePasswordParams{ID: u.ID, PasswordHash: hash}); err != nil {
+	if err := s.qry(r).UpdatePassword(r.Context(), store.UpdatePasswordParams{ID: u.ID, PasswordHash: hash}); err != nil {
 		writeProblem(w, r, err)
 		return
 	}
-	_ = s.q.RevokeAllRefreshTokens(r.Context(), u.ID)
-	_ = s.q.InsertAudit(r.Context(), store.InsertAuditParams{UserID: &u.ID, Entity: "user", EntityID: u.ID, Action: "change_password"})
+	_ = s.qry(r).RevokeAllRefreshTokens(r.Context(), u.ID)
+	_ = s.qry(r).InsertAudit(r.Context(), store.InsertAuditParams{UserID: &u.ID, Entity: "user", EntityID: u.ID, Action: "change_password"})
 	s.setRefreshCookie(w, "", time.Unix(0, 0))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -207,7 +207,7 @@ func (s *Server) deleteMe(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, err)
 		return
 	}
-	u, err := s.q.GetUser(r.Context(), UserID(r.Context()))
+	u, err := s.qry(r).GetUser(r.Context(), UserID(r.Context()))
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -238,7 +238,7 @@ func accountViewOf(a store.DematAccount) accountView {
 }
 
 func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListAccounts(r.Context(), UserID(r.Context()))
+	rows, err := s.qry(r).ListAccounts(r.Context(), UserID(r.Context()))
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -272,7 +272,7 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, validation(fields))
 		return
 	}
-	a, err := s.q.CreateAccount(r.Context(), store.CreateAccountParams{UserID: UserID(r.Context()), Broker: body.Broker, Nickname: body.Nickname})
+	a, err := s.qry(r).CreateAccount(r.Context(), store.CreateAccountParams{UserID: UserID(r.Context()), Broker: body.Broker, Nickname: body.Nickname})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -287,7 +287,7 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if _, err := s.q.GetAccount(r.Context(), store.GetAccountParams{ID: id, UserID: UserID(r.Context())}); err != nil {
+	if _, err := s.qry(r).GetAccount(r.Context(), store.GetAccountParams{ID: id, UserID: UserID(r.Context())}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeProblem(w, r, notFound("account"))
 			return
@@ -295,7 +295,7 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, err)
 		return
 	}
-	if err := s.q.DeleteAccount(r.Context(), store.DeleteAccountParams{ID: id, UserID: UserID(r.Context())}); err != nil {
+	if err := s.qry(r).DeleteAccount(r.Context(), store.DeleteAccountParams{ID: id, UserID: UserID(r.Context())}); err != nil {
 		writeProblem(w, r, err)
 		return
 	}

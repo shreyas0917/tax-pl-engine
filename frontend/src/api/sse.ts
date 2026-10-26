@@ -33,17 +33,20 @@ const initial: JobProgress = { state: null, events: [], terminal: false, error: 
  */
 export function useJobProgress(jobId: string | null | undefined): JobProgress {
   const [progress, setProgress] = useState<JobProgress>(initial)
+  const [tracked, setTracked] = useState(jobId)
   const retried = useRef(false)
 
+  // Reset when the job changes (state adjustment during render, not in an effect).
+  if (tracked !== jobId) {
+    setTracked(jobId)
+    setProgress(initial)
+  }
+
   useEffect(() => {
-    if (!jobId) {
-      setProgress(initial)
-      return
-    }
+    if (!jobId) return
     let closed = false
     let source: EventSource | null = null
     retried.current = false
-    setProgress({ ...initial, connection: 'idle' })
 
     const finish = async (state: JobState) => {
       try {

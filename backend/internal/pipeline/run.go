@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/shopspring/decimal"
+
+	"github.com/shreyas0917/taxpl/internal/charges"
 	"github.com/shreyas0917/taxpl/internal/domain"
 	"github.com/shreyas0917/taxpl/internal/matcher"
 	"github.com/shreyas0917/taxpl/internal/normalize"
@@ -34,6 +37,9 @@ type Request struct {
 	// ExtraTrades lets callers inject non-file trades (transfers, opening lots as trades, buybacks).
 	ExtraTrades []domain.Trade
 	AsOf        domain.Date
+	// EstimateCharges fills in charges from the dated schedule for trades that carry none.
+	// Estimated values are labelled "estimated" and shown as such.
+	EstimateCharges bool
 }
 
 // FileResult reports what happened to one file.
@@ -131,6 +137,11 @@ func Run(req Request) (*Report, error) {
 		c := tax.ConfigFor(latest)
 		cfg.IntradayNetting, cfg.GrandfatheringCutoff = c.IntradayNetting, c.GrandfatheringCutoff
 	}
+	if req.EstimateCharges {
+		if err := estimateCharges(trades, req, instruments, cfg); err != nil {
+			return nil, err
+		}
+	}
 	mres, err := matcher.Match(matcher.Input{Trades: trades, CorporateActions: req.CorporateActions, Instruments: instruments, OpeningLots: req.OpeningLots, Config: cfg})
 	if err != nil {
 		return nil, err
@@ -187,6 +198,66 @@ func Run(req Request) (*Report, error) {
 	sort.SliceStable(review, func(i, j int) bool { return review[i].ID < review[j].ID })
 	rep.Review = review
 	return rep, nil
+}
+
+// estimateCharges runs a first matching pass to learn which quantities were squared off
+// intraday (different STT), then attaches estimated charges to every regular trade that has
+// none. Brokerage is charged once per trade; the per-value levies are split by quantity.
+func estimateCharges(trades []domain.Trade, req Request, instruments map[string]domain.Instrument, cfg matcher.Config) error {
+	sched, err := charges.Load()
+	if err != nil {
+		return err
+	}
+	first, err := matcher.Match(matcher.Input{Trades: trades, CorporateActions: req.CorporateActions, Instruments: instruments, OpeningLots: req.OpeningLots, Config: cfg})
+	if err != nil {
+		return err
+	}
+	intradayQty := map[string]decimal.Decimal{}
+	for _, m := range first.Intraday {
+		intradayQty[m.BuyTradeID] = intradayQty[m.BuyTradeID].Add(m.Quantity)
+		intradayQty[m.SellTradeID] = intradayQty[m.SellTradeID].Add(m.Quantity)
+	}
+	for i := range trades {
+		t := &trades[i]
+		inScope := t.Segment.IsEquityLike() || t.Segment.IsFNO()
+		if t.Charges != nil || (t.Kind != "" && t.Kind != domain.KindRegular) || !inScope {
+			continue
+		}
+		iq := intradayQty[t.ID]
+		if t.Segment.IsFNO() || iq.IsZero() || iq.Equal(t.Quantity) {
+			c, err := sched.Estimate(*t, charges.ClassOf(*t, iq.IsPositive()))
+			if err != nil {
+				return err
+			}
+			t.Charges = &c
+			continue
+		}
+		// Mixed: brokerage on the whole order (class of the larger part), levies by part.
+		dq := t.Quantity.Sub(iq)
+		major := charges.ClassDelivery
+		if iq.GreaterThan(dq) {
+			major = charges.ClassIntraday
+		}
+		whole, err := sched.Estimate(*t, major)
+		if err != nil {
+			return err
+		}
+		del, intra := *t, *t
+		del.Quantity, intra.Quantity = dq, iq
+		cd, err := sched.Estimate(del, charges.ClassDelivery)
+		if err != nil {
+			return err
+		}
+		ci, err := sched.Estimate(intra, charges.ClassIntraday)
+		if err != nil {
+			return err
+		}
+		c := domain.Charges{Source: "estimated", Brokerage: whole.Brokerage, STT: cd.STT.Add(ci.STT), ExchangeFee: cd.ExchangeFee.Add(ci.ExchangeFee),
+			SEBIFee: cd.SEBIFee.Add(ci.SEBIFee), StampDuty: cd.StampDuty.Add(ci.StampDuty)}
+		c.GST = domain.RoundMoney(c.Brokerage.Add(c.ExchangeFee).Add(c.SEBIFee).Mul(sched.GSTPct))
+		t.Charges = &c
+	}
+	return nil
 }
 
 func dedupe(ts []domain.Trade) []domain.Trade {

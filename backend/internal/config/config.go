@@ -15,6 +15,8 @@ type Config struct {
 	AppEnv         string
 	HTTPAddr       string
 	DatabaseURL    string
+	DBAppRole      string // role assumed by user-facing connections (RLS applies); empty disables
+	DBSystemRole   string // role for cross-user maintenance (BYPASSRLS); empty = login role
 	RedisURL       string
 	JWTSecret      string
 	FrontendOrigin string
@@ -45,6 +47,8 @@ func Load() (Config, error) {
 		AppEnv:         get("APP_ENV", "dev"),
 		HTTPAddr:       get("HTTP_ADDR", ":8080"),
 		DatabaseURL:    get("DATABASE_URL", ""),
+		DBAppRole:      get("DB_APP_ROLE", "taxpl_app"),
+		DBSystemRole:   get("DB_SYSTEM_ROLE", "taxpl_system"),
 		RedisURL:       get("REDIS_URL", ""),
 		JWTSecret:      get("JWT_SECRET", ""),
 		FrontendOrigin: get("FRONTEND_ORIGIN", "http://localhost:5173"),

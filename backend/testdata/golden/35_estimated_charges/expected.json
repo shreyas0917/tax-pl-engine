@@ -1,0 +1,31 @@
+{
+  "summaries": {
+    "2025-26": {
+      "stcg": "9977.3925",
+      "ltcg": "0",
+      "intraday": "0",
+      "fno": "0",
+      "fno_turnover": "0",
+      "buyback_dividend": "0",
+      "buyback_exempt": "0",
+      "estimated_tax": "1995.4785"
+    }
+  },
+  "gains": [
+    {
+      "fy": "2025-26",
+      "category": "STCG_EQUITY",
+      "account": "A",
+      "symbol": "INFY",
+      "sale_date": "2025-09-02",
+      "acquisition_date": "2025-06-02",
+      "quantity": "100",
+      "sale_value": "110000",
+      "cost": "100018.6226",
+      "charges": "3.9849",
+      "gain": "9977.3925"
+    }
+  ],
+  "review": [],
+  "open_lots": []
+}

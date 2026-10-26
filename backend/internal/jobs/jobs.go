@@ -52,7 +52,8 @@ const MaxAttempts = 3
 
 // Service wires the workers to their dependencies.
 type Service struct {
-	Pool   *pgxpool.Pool
+	Pool   *pgxpool.Pool // user-scoped work (RLS); every transaction sets app.user_id
+	Sys    *pgxpool.Pool // cross-user maintenance (purge); nil = Pool
 	Blob   blob.Store
 	Log    *slog.Logger
 	River  *river.Client[pgx.Tx]
@@ -150,9 +151,13 @@ func (PurgeArgs) Kind() string { return "purge_raw_files" }
 // recomputes are harmless because each one is idempotent and they are serialised by the
 // per-user advisory lock.
 func EnqueueRecompute(ctx context.Context, client *river.Client[pgx.Tx], tx pgx.Tx, userID string) error {
-	_, err := client.InsertTx(ctx, tx, RecomputeArgs{UserID: userID}, &river.InsertOpts{MaxAttempts: MaxAttempts})
+	_, err := client.InsertTx(ctx, tx, RecomputeArgs{UserID: userID}, &river.InsertOpts{MaxAttempts: MaxAttempts, Queue: Queue})
 	return err
 }
+
+// Queue is the River queue jobs are inserted into. Tests point it at a queue no worker
+// serves so a live development worker cannot interfere with their assertions.
+var Queue = river.QueueDefault
 
 // --- state transitions ----------------------------------------------------------------------
 
@@ -184,7 +189,7 @@ func Transition(ctx context.Context, q *store.Queries, jobID, userID, state, mes
 
 func (s *Service) fail(ctx context.Context, jobID, userID string, err error) {
 	s.Log.Error("job failed", "job_id", jobID, "user_id", userID, "err", err)
-	_ = store.WithTx(ctx, s.Pool, func(_ pgx.Tx, q *store.Queries) error {
+	_ = store.WithUserTx(ctx, s.Pool, userID, func(_ pgx.Tx, q *store.Queries) error {
 		return Transition(ctx, q, jobID, userID, StateFailed, friendly(err), nil, err)
 	})
 }
@@ -217,12 +222,17 @@ func (w *processUploadWorker) Work(ctx context.Context, job *river.Job[ProcessUp
 // ProcessUpload parses and normalises one upload, stores the trades idempotently and queues
 // a recompute, all in one transaction.
 func (s *Service) ProcessUpload(ctx context.Context, a ProcessUploadArgs) error {
-	q := store.New(s.Pool)
-	up, err := q.GetUpload(ctx, store.GetUploadParams{ID: a.UploadID, UserID: a.UserID})
-	if err != nil {
-		return fmt.Errorf("load upload: %w", err)
-	}
-	if err := store.WithTx(ctx, s.Pool, func(_ pgx.Tx, q *store.Queries) error {
+	var up store.Upload
+	var instruments map[string]domain.Instrument
+	var symbolToISIN map[string]string
+	if err := store.WithUserTx(ctx, s.Pool, a.UserID, func(_ pgx.Tx, q *store.Queries) error {
+		var err error
+		if up, err = q.GetUpload(ctx, store.GetUploadParams{ID: a.UploadID, UserID: a.UserID}); err != nil {
+			return fmt.Errorf("load upload: %w", err)
+		}
+		if instruments, symbolToISIN, err = s.referenceData(ctx, q, a.UserID); err != nil {
+			return err
+		}
 		return Transition(ctx, q, a.JobID, a.UserID, StateParsing, "Reading "+up.Filename, nil, nil)
 	}); err != nil {
 		return err
@@ -257,13 +267,9 @@ func (s *Service) ProcessUpload(ctx context.Context, a ProcessUploadArgs) error 
 		return fmt.Errorf("parse %s: %w", up.Filename, err)
 	}
 
-	instruments, symbolToISIN, err := s.referenceData(ctx, q, a.UserID)
-	if err != nil {
-		return err
-	}
 	n := normalize.Normalize(normalize.Input{AccountID: up.AccountID, Broker: brokerName, SourceFile: up.Filename, Rows: rows, Instruments: instruments, SymbolToISIN: symbolToISIN})
 
-	return store.WithTx(ctx, s.Pool, func(tx pgx.Tx, q *store.Queries) error {
+	return store.WithUserTx(ctx, s.Pool, a.UserID, func(tx pgx.Tx, q *store.Queries) error {
 		inserted := 0
 		for _, t := range n.Trades {
 			rows, err := q.InsertTrade(ctx, TradeInsertParams(a.UserID, &a.UploadID, t))
@@ -346,12 +352,16 @@ func (w *recomputeWorker) Work(ctx context.Context, job *river.Job[RecomputeArgs
 	err := w.svc.Recompute(ctx, job.Args.UserID, "")
 	if err != nil && lastAttempt(job.JobRow) {
 		// Mark every job waiting on this recompute as failed.
-		q := store.New(w.svc.Pool)
-		for _, st := range []string{StateNormalized, StateAdjusted, StateMatched} {
-			waiting, _ := q.ListJobsInState(ctx, store.ListJobsInStateParams{UserID: job.Args.UserID, State: st})
-			for _, j := range waiting {
-				w.svc.fail(ctx, j.ID, job.Args.UserID, err)
+		var waiting []store.Job
+		_ = store.WithUserTx(ctx, w.svc.Pool, job.Args.UserID, func(_ pgx.Tx, q *store.Queries) error {
+			for _, st := range []string{StateNormalized, StateAdjusted, StateMatched} {
+				js, _ := q.ListJobsInState(ctx, store.ListJobsInStateParams{UserID: job.Args.UserID, State: st})
+				waiting = append(waiting, js...)
 			}
+			return nil
+		})
+		for _, j := range waiting {
+			w.svc.fail(ctx, j.ID, job.Args.UserID, err)
 		}
 	}
 	return err
@@ -392,7 +402,7 @@ func BuildRequest(ctx context.Context, q *store.Queries, userID string) (pipelin
 // by a per-user advisory lock. jobID, when set, is the job to report progress on; otherwise
 // every job of the user waiting in NORMALIZED state is advanced.
 func (s *Service) Recompute(ctx context.Context, userID, jobID string) error {
-	return store.WithTx(ctx, s.Pool, func(tx pgx.Tx, q *store.Queries) error {
+	return store.WithUserTx(ctx, s.Pool, userID, func(tx pgx.Tx, q *store.Queries) error {
 		if err := store.LockUser(ctx, tx, userID); err != nil {
 			return err
 		}
@@ -552,22 +562,22 @@ func (s *Service) GenerateReport(ctx context.Context, a ReportArgs) error {
 	if !ok {
 		return fmt.Errorf("report format %q is not supported", a.Format)
 	}
-	q := store.New(s.Pool)
-	if err := store.WithTx(ctx, s.Pool, func(_ pgx.Tx, q *store.Queries) error {
+	var req pipeline.Request
+	var accounts []store.DematAccount
+	if err := store.WithUserTx(ctx, s.Pool, a.UserID, func(_ pgx.Tx, q *store.Queries) error {
+		var err error
+		if req, err = BuildRequest(ctx, q, a.UserID); err != nil {
+			return err
+		}
+		if accounts, err = q.ListAccounts(ctx, a.UserID); err != nil {
+			return err
+		}
 		return Transition(ctx, q, a.JobID, a.UserID, StateComputed, "Generating "+strings.ToUpper(a.Format)+" report for "+a.FY, nil, nil)
 	}); err != nil {
 		return err
 	}
-	req, err := BuildRequest(ctx, q, a.UserID)
-	if err != nil {
-		return err
-	}
 	req.FY = a.FY
 	// Account IDs are UUIDs in the database; reports need the nicknames.
-	accounts, err := q.ListAccounts(ctx, a.UserID)
-	if err != nil {
-		return err
-	}
 	names := map[string]string{}
 	for _, acc := range accounts {
 		names[acc.ID] = acc.Nickname + " (" + acc.Broker + ")"
@@ -595,7 +605,7 @@ func (s *Service) GenerateReport(ctx context.Context, a ReportArgs) error {
 		return err
 	}
 	rulesVersion := rep.RulesVersions[a.FY]
-	return store.WithTx(ctx, s.Pool, func(_ pgx.Tx, q *store.Queries) error {
+	return store.WithUserTx(ctx, s.Pool, a.UserID, func(_ pgx.Tx, q *store.Queries) error {
 		rep, err := q.CreateReport(ctx, store.CreateReportParams{UserID: a.UserID, JobID: &a.JobID, Fy: a.FY, Format: a.Format, BlobKey: key, Checksum: jsonreport.Checksum(data), RulesVersion: rulesVersion, SizeBytes: int64(len(data))})
 		if err != nil {
 			return err
@@ -617,7 +627,11 @@ func (w *purgeWorker) Work(ctx context.Context, _ *river.Job[PurgeArgs]) error {
 
 // PurgeRawFiles deletes raw uploads older than the TTL (spec Section 13). Parsed trades stay.
 func (s *Service) PurgeRawFiles(ctx context.Context, now time.Time) error {
-	q := store.New(s.Pool)
+	sys := s.Sys
+	if sys == nil {
+		sys = s.Pool
+	}
+	q := store.New(sys)
 	ups, err := q.ListUploadsToPurge(ctx, now.Add(-s.RawTTL))
 	if err != nil {
 		return err
@@ -639,26 +653,32 @@ func (s *Service) PurgeRawFiles(ctx context.Context, now time.Time) error {
 
 // DeleteUserData removes every blob and row for a user (DELETE /me).
 func (s *Service) DeleteUserData(ctx context.Context, userID string) error {
-	q := store.New(s.Pool)
-	ups, err := q.ListUploadBlobKeys(ctx, userID)
-	if err != nil {
+	var keys []string
+	if err := store.WithUserTx(ctx, s.Pool, userID, func(_ pgx.Tx, q *store.Queries) error {
+		ups, err := q.ListUploadBlobKeys(ctx, userID)
+		if err != nil {
+			return err
+		}
+		for _, u := range ups {
+			keys = append(keys, u.BlobKey)
+		}
+		reps, err := q.ListReportBlobKeys(ctx, userID)
+		if err != nil {
+			return err
+		}
+		for _, r := range reps {
+			keys = append(keys, r.BlobKey)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
-	for _, u := range ups {
-		if err := s.Blob.Delete(ctx, u.BlobKey); err != nil && !errors.Is(err, blob.ErrNotFound) {
+	for _, k := range keys {
+		if err := s.Blob.Delete(ctx, k); err != nil && !errors.Is(err, blob.ErrNotFound) {
 			return err
 		}
 	}
-	reps, err := q.ListReportBlobKeys(ctx, userID)
-	if err != nil {
-		return err
-	}
-	for _, r := range reps {
-		if err := s.Blob.Delete(ctx, r.BlobKey); err != nil && !errors.Is(err, blob.ErrNotFound) {
-			return err
-		}
-	}
-	return store.WithTx(ctx, s.Pool, func(_ pgx.Tx, q *store.Queries) error {
+	return store.WithUserTx(ctx, s.Pool, userID, func(_ pgx.Tx, q *store.Queries) error {
 		if err := q.InsertAudit(ctx, store.InsertAuditParams{UserID: &userID, Entity: "user", EntityID: userID, Action: "delete_all_data"}); err != nil {
 			return err
 		}

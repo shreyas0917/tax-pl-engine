@@ -88,7 +88,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	uid := UserID(r.Context())
-	if _, err := s.q.GetAccount(r.Context(), store.GetAccountParams{ID: accountID, UserID: uid}); err != nil {
+	if _, err := s.qry(r).GetAccount(r.Context(), store.GetAccountParams{ID: accountID, UserID: uid}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeProblem(w, r, validation(map[string]string{"account_id": "no such account"}))
 			return
@@ -100,10 +100,10 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	sha := hex.EncodeToString(sum[:])
 
 	// Idempotent: existing upload with the same content is returned as-is.
-	if existing, err := s.q.GetUploadBySHA(r.Context(), store.GetUploadBySHAParams{UserID: uid, Sha256: sha}); err == nil {
+	if existing, err := s.qry(r).GetUploadBySHA(r.Context(), store.GetUploadBySHAParams{UserID: uid, Sha256: sha}); err == nil {
 		v := uploadViewOf(existing)
 		v.Duplicate = true
-		if js, err := s.q.ListJobsForUpload(r.Context(), &existing.ID); err == nil && len(js) > 0 {
+		if js, err := s.qry(r).ListJobsForUpload(r.Context(), &existing.ID); err == nil && len(js) > 0 {
 			v.JobID = js[len(js)-1].ID
 			v.Status = js[len(js)-1].State
 		}
@@ -132,7 +132,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out uploadView
-	err = store.WithTx(r.Context(), s.pool, func(tx pgx.Tx, q *store.Queries) error {
+	err = store.WithTx(r.Context(), s.db(r), func(tx pgx.Tx, q *store.Queries) error {
 		up, err := q.CreateUpload(r.Context(), store.CreateUploadParams{UserID: uid, AccountID: accountID, Broker: broker, Filename: filepath.Base(hdr.Filename),
 			Sha256: sha, SizeBytes: int64(len(data)), BlobKey: key})
 		if err != nil {
@@ -158,7 +158,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		if err := q.InsertAudit(r.Context(), store.InsertAuditParams{UserID: &uid, Entity: "upload", EntityID: up.ID, Action: "create", After: payload}); err != nil {
 			return err
 		}
-		if _, err := s.jobs.River.InsertTx(r.Context(), tx, jobs.ProcessUploadArgs{UserID: uid, UploadID: up.ID, JobID: job.ID}, &river.InsertOpts{MaxAttempts: jobs.MaxAttempts}); err != nil {
+		if _, err := s.jobs.River.InsertTx(r.Context(), tx, jobs.ProcessUploadArgs{UserID: uid, UploadID: up.ID, JobID: job.ID}, &river.InsertOpts{MaxAttempts: jobs.MaxAttempts, Queue: jobs.Queue}); err != nil {
 			return err
 		}
 		out = uploadViewOf(up)
@@ -182,7 +182,7 @@ func uploadViewOf(u store.Upload) uploadView {
 }
 
 func (s *Server) listUploads(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListUploads(r.Context(), store.ListUploadsParams{UserID: UserID(r.Context()), Limit: 100})
+	rows, err := s.qry(r).ListUploads(r.Context(), store.ListUploadsParams{UserID: UserID(r.Context()), Limit: 100})
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -190,7 +190,7 @@ func (s *Server) listUploads(w http.ResponseWriter, r *http.Request) {
 	out := make([]uploadView, 0, len(rows))
 	for _, u := range rows {
 		v := uploadViewOf(u)
-		if js, err := s.q.ListJobsForUpload(r.Context(), &u.ID); err == nil && len(js) > 0 {
+		if js, err := s.qry(r).ListJobsForUpload(r.Context(), &u.ID); err == nil && len(js) > 0 {
 			v.JobID = js[len(js)-1].ID
 			v.Status = js[len(js)-1].State
 		}
@@ -202,7 +202,7 @@ func (s *Server) listUploads(w http.ResponseWriter, r *http.Request) {
 // enqueueRecompute creates a RECOMPUTE job row and queues it. The job ID is stored on the
 // request header X-Recompute-Job for the handler to echo in its response.
 func (s *Server) enqueueRecompute(r *http.Request, uid string) error {
-	return store.WithTx(r.Context(), s.pool, func(tx pgx.Tx, q *store.Queries) error {
+	return store.WithTx(r.Context(), s.db(r), func(tx pgx.Tx, q *store.Queries) error {
 		job, err := q.CreateJob(r.Context(), store.CreateJobParams{UserID: uid, Kind: jobs.KindRecompute, State: jobs.StateNormalized, Payload: []byte("{}")})
 		if err != nil {
 			return err

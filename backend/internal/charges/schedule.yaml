@@ -1,0 +1,46 @@
+# Dated charge schedule used when a tradebook carries no charges. Values are fractions of
+# trade value. Every output computed from this file is labelled "estimated".
+# Sources are listed at the bottom; verify against the latest NSE/SEBI circulars before relying on them.
+version: 1
+stt:
+  # Equity delivery: 0.1% on both sides (unchanged by Budget 2026).
+  - { from: "2023-04-01", segment: EQ_DELIVERY, side: BOTH, pct: "0.001", source: "Finance (No.2) Act 2004 s.98; ClearTax STT guide" }
+  # Equity intraday: 0.025% on the sell side only.
+  - { from: "2023-04-01", segment: EQ_INTRADAY, side: SELL, pct: "0.00025" }
+  # Futures: 0.0125% to 30 Sep 2024, 0.02% from 1 Oct 2024, 0.05% from 1 Apr 2026 (Finance Act 2026).
+  - { from: "2023-04-01", to: "2024-09-30", segment: FUT, side: SELL, pct: "0.000125" }
+  - { from: "2024-10-01", to: "2026-03-31", segment: FUT, side: SELL, pct: "0.0002" }
+  - { from: "2026-04-01", segment: FUT, side: SELL, pct: "0.0005", source: "NSE circular FATAX73524" }
+  # Options (on premium): 0.0625% to 30 Sep 2024, 0.1% from 1 Oct 2024, 0.15% from 1 Apr 2026.
+  - { from: "2023-04-01", to: "2024-09-30", segment: OPT, side: SELL, pct: "0.000625" }
+  - { from: "2024-10-01", to: "2026-03-31", segment: OPT, side: SELL, pct: "0.001" }
+  - { from: "2026-04-01", segment: OPT, side: SELL, pct: "0.0015", source: "NSE circular FATAX73524" }
+exchange:
+  # NSE transaction charges (approximate, both sides).
+  - { from: "2023-04-01", segment: EQ_DELIVERY, side: BOTH, pct: "0.0000297" }
+  - { from: "2023-04-01", segment: EQ_INTRADAY, side: BOTH, pct: "0.0000297" }
+  - { from: "2023-04-01", segment: FUT, side: BOTH, pct: "0.0000173" }
+  - { from: "2023-04-01", segment: OPT, side: BOTH, pct: "0.0003503" }
+sebi:
+  - { from: "2023-04-01", segment: EQ_DELIVERY, side: BOTH, pct: "0.000001" }
+  - { from: "2023-04-01", segment: EQ_INTRADAY, side: BOTH, pct: "0.000001" }
+  - { from: "2023-04-01", segment: FUT, side: BOTH, pct: "0.000001" }
+  - { from: "2023-04-01", segment: OPT, side: BOTH, pct: "0.000001" }
+stamp:
+  # Stamp duty on the buy side only (Finance Act 2019 amendments to the Indian Stamp Act).
+  - { from: "2023-04-01", segment: EQ_DELIVERY, side: BUY, pct: "0.00015" }
+  - { from: "2023-04-01", segment: EQ_INTRADAY, side: BUY, pct: "0.00003" }
+  - { from: "2023-04-01", segment: FUT, side: BUY, pct: "0.00002" }
+  - { from: "2023-04-01", segment: OPT, side: BUY, pct: "0.00003" }
+gst_pct: "0.18"
+brokers:
+  - { broker: default, delivery_pct: "0", delivery_flat: "20", intraday_pct: "0.0003", intraday_flat: "0", fno_flat: "20", fno_pct: "0", max_per_order: "20" }
+  - { broker: zerodha, delivery_pct: "0", delivery_flat: "0", intraday_pct: "0.0003", intraday_flat: "0", fno_flat: "20", fno_pct: "0", max_per_order: "20", source: "https://zerodha.com/charges" }
+  - { broker: groww, delivery_pct: "0.001", delivery_flat: "0", intraday_pct: "0.001", intraday_flat: "0", fno_flat: "20", fno_pct: "0", max_per_order: "20", source: "https://groww.in/pricing" }
+  - { broker: upstox, delivery_pct: "0", delivery_flat: "20", intraday_pct: "0.0005", intraday_flat: "0", fno_flat: "20", fno_pct: "0", max_per_order: "20", source: "https://upstox.com/brokerage-charges/" }
+  - { broker: angelone, delivery_pct: "0", delivery_flat: "20", intraday_pct: "0.0003", intraday_flat: "0", fno_flat: "20", fno_pct: "0", max_per_order: "20", source: "https://www.angelone.in/pricing" }
+sources:
+  - "https://nsearchives.nseindia.com/content/circulars/FATAX73524.pdf"
+  - "https://cleartax.in/s/securities-transaction-tax-stt"
+  - "https://fyers.in/notice-board/revision-in-securities-transaction-tax-stt-effective-april-01-2026/"
+  - "https://zerodha.com/charges"

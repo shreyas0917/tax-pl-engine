@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shreyas0917/taxpl/internal/store"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,7 +19,42 @@ import (
 
 type ctxKey int
 
-const userKey ctxKey = 1
+const (
+	userKey ctxKey = 1
+	connKey ctxKey = 2
+)
+
+// userConn is the per-request connection with app.user_id set (row-level security).
+type userConn struct {
+	conn    *pgxpool.Conn
+	release func()
+	once    sync.Once
+}
+
+func (u *userConn) done() { u.once.Do(u.release) }
+
+// qry returns queries bound to the request user, or the system queries for public routes.
+func (s *Server) qry(r *http.Request) *store.Queries {
+	if uc, ok := r.Context().Value(connKey).(*userConn); ok {
+		return store.New(uc.conn)
+	}
+	return s.sys
+}
+
+// db returns the transaction starter bound to the request user.
+func (s *Server) db(r *http.Request) store.DB {
+	if uc, ok := r.Context().Value(connKey).(*userConn); ok {
+		return uc.conn
+	}
+	return s.sysDB
+}
+
+// releaseUserConn hands the connection back early (long-lived streams).
+func releaseUserConn(r *http.Request) {
+	if uc, ok := r.Context().Value(connKey).(*userConn); ok {
+		uc.done()
+	}
+}
 
 // UserID returns the authenticated user ID from the context.
 func UserID(ctx context.Context) string {
@@ -44,7 +81,16 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			writeProblem(w, r, unauthorized("invalid or expired token"))
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, uid)))
+		conn, release, err := store.AcquireUser(r.Context(), s.pool, uid)
+		if err != nil {
+			writeProblem(w, r, err)
+			return
+		}
+		uc := &userConn{conn: conn, release: release}
+		defer uc.done()
+		ctx := context.WithValue(r.Context(), userKey, uid)
+		ctx = context.WithValue(ctx, connKey, uc)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

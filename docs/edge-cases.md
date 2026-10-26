@@ -61,3 +61,15 @@ Every trade has a content-derived ID, so a duplicate upload (or an overlapping e
 ## 14. Short-first intraday and F&O short positions
 A sell at 10:00 and a buy at 14:00 with no holdings is an intraday pair, not a missing-purchase error. In F&O a sell opens a short position that a later buy closes FIFO.
 **Tests:** `33_intraday_sell_before_buy`, `23_fno_basic`, `24_fno_partial_fifo`.
+
+## 15. Tradebooks without charges
+Most tradebook exports carry no brokerage, STT or levies. Rather than silently ignoring them, the engine can estimate them from a dated schedule (STT on futures and options changed on 1 Oct 2024 and again on 1 Apr 2026), labels every estimated value as such, keeps STT out of capital-gains cost and includes it for business income. Intraday legs get the intraday STT rate; the delivery remainder of a partly squared-off order gets the delivery rate.
+**Tests:** `35_estimated_charges`, `charges_test.go`.
+
+## 16. The broker says you hold 100, the engine says 94
+Holdings reconciliation compares the broker's current holdings statement with the engine's open lots per account and names each difference: missing purchase history, a sale or transfer the uploads do not contain, or an average price that disagrees by more than 1%. It is how a user finds out that an old tradebook is missing before the numbers go in the ITR.
+**Tests:** `reconcile_test.go`; API `POST /holdings/reconcile`.
+
+## 17. One tenant must never see another
+Every user-owned table has row-level security forced on; the API switches to a non-owner role and binds each request's connection to `app.user_id`, the worker sets it per transaction, and the audit log is append-only for that role. The test writes two users, then proves user A cannot read, count or write user B's rows and cannot delete audit entries.
+**Test:** `TestIntegrationRowLevelSecurity`.

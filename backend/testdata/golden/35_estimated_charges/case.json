@@ -1,0 +1,11 @@
+{
+  "note": "Estimated charges (Zerodha, delivery): buy 1,00,000 adds exchange 2.97 + SEBI 0.10 + stamp 15 + GST 0.5526 to cost (STT 100 excluded); sell 1,10,000 deducts exchange 3.267 + SEBI 0.11 + GST 0.6079 = 3.9849 (STT 110 excluded). Gain = 110000 - 100018.6226 - 3.9849 = 9977.3925.",
+  "fy": "2025-26",
+  "estimate_charges": true,
+  "files": [
+    {
+      "name": "a.csv",
+      "account": "A"
+    }
+  ]
+}

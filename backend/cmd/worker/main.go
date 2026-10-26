@@ -30,7 +30,7 @@ func run() error {
 		return err
 	}
 	defer a.Close()
-	if err := jobs.Migrate(ctx, a.Pool); err != nil {
+	if err := jobs.Migrate(ctx, a.Sys); err != nil {
 		return fmt.Errorf("river migrate: %w", err)
 	}
 	client, err := jobs.NewWorkerClient(a.Pool, a.Jobs, a.Cfg.WorkerCount, a.Log)

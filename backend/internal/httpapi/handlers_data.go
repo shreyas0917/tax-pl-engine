@@ -69,7 +69,7 @@ func fyParam(r *http.Request) (string, error) {
 }
 
 func (s *Server) loadGains(r *http.Request, fy string) ([]domain.Gain, map[string]string, error) {
-	rows, err := s.q.ListGainsForFY(r.Context(), store.ListGainsForFYParams{UserID: UserID(r.Context()), Fy: fy})
+	rows, err := s.qry(r).ListGainsForFY(r.Context(), store.ListGainsForFYParams{UserID: UserID(r.Context()), Fy: fy})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -108,10 +108,10 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	uid := UserID(r.Context())
-	open, _ := s.q.CountOpenReviewItems(r.Context(), uid)
-	fys, _ := s.q.ListGainFYs(r.Context(), uid)
+	open, _ := s.qry(r).CountOpenReviewItems(r.Context(), uid)
+	fys, _ := s.qry(r).ListGainFYs(r.Context(), uid)
 	var comp any
-	if c, err := s.q.LatestComputation(r.Context(), uid); err == nil {
+	if c, err := s.qry(r).LatestComputation(r.Context(), uid); err == nil {
 		comp = map[string]any{"id": c.ID, "checksum": c.Checksum, "rules_versions": json.RawMessage(c.RulesVersions), "trade_count": c.TradeCount, "created_at": c.CreatedAt}
 	}
 	writeJSON(w, 200, map[string]any{"summary": sum, "open_review_items": open, "years_with_data": fys, "computation": comp, "disclaimer": "This is not tax advice. Verify with a qualified CA."})
@@ -203,7 +203,7 @@ func (s *Server) listGains(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	size := pageSize(r)
-	rows, err := s.q.ListGainsPage(r.Context(), store.ListGainsPageParams{UserID: UserID(r.Context()), Fy: fy, Category: optStr(r.URL.Query().Get("category")),
+	rows, err := s.qry(r).ListGainsPage(r.Context(), store.ListGainsPageParams{UserID: UserID(r.Context()), Fy: fy, Category: optStr(r.URL.Query().Get("category")),
 		AccountID: optStr(r.URL.Query().Get("account")), Isin: optStr(strings.ToUpper(r.URL.Query().Get("isin"))), CursorDate: curDate.Time(), CursorKey: cur.Key, PageSize: size + 1})
 	if err != nil {
 		writeProblem(w, r, err)
@@ -234,7 +234,7 @@ func (s *Server) listGains(w http.ResponseWriter, r *http.Request) {
 
 // explainGain returns the "why this number" tree: the gain's derivation plus the matched lot(s).
 func (s *Server) explainGain(w http.ResponseWriter, r *http.Request) {
-	row, err := s.q.GetGain(r.Context(), store.GetGainParams{ID: chi.URLParam(r, "id"), UserID: UserID(r.Context())})
+	row, err := s.qry(r).GetGain(r.Context(), store.GetGainParams{ID: chi.URLParam(r, "id"), UserID: UserID(r.Context())})
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -244,7 +244,7 @@ func (s *Server) explainGain(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, err)
 		return
 	}
-	req, err := jobs.BuildRequest(r.Context(), s.q, UserID(r.Context()))
+	req, err := jobs.BuildRequest(r.Context(), s.qry(r), UserID(r.Context()))
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -281,7 +281,7 @@ func (s *Server) listTrades(w http.ResponseWriter, r *http.Request) {
 		start, end = &at, &bt
 	}
 	size := pageSize(r)
-	rows, err := s.q.ListTradesPage(r.Context(), store.ListTradesPageParams{UserID: UserID(r.Context()), FyStart: start, FyEnd: end, AccountID: optStr(r.URL.Query().Get("account")),
+	rows, err := s.qry(r).ListTradesPage(r.Context(), store.ListTradesPageParams{UserID: UserID(r.Context()), FyStart: start, FyEnd: end, AccountID: optStr(r.URL.Query().Get("account")),
 		Isin: optStr(strings.ToUpper(r.URL.Query().Get("isin"))), CursorDate: curDate.Time(), CursorID: cur.Key, PageSize: size + 1})
 	if err != nil {
 		writeProblem(w, r, err)
@@ -328,7 +328,7 @@ func (s *Server) listTrades(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listHoldings(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListOpenLots(r.Context(), UserID(r.Context()))
+	rows, err := s.qry(r).ListOpenLots(r.Context(), UserID(r.Context()))
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -395,7 +395,7 @@ func (s *Server) createReport(w http.ResponseWriter, r *http.Request) {
 	uid := UserID(r.Context())
 	var jobID string
 	reportID := newID()
-	err := store.WithTx(r.Context(), s.pool, func(tx pgx.Tx, q *store.Queries) error {
+	err := store.WithTx(r.Context(), s.db(r), func(tx pgx.Tx, q *store.Queries) error {
 		payload, _ := json.Marshal(map[string]string{"fy": body.FY, "format": body.Format, "report_id": reportID})
 		job, err := q.CreateJob(r.Context(), store.CreateJobParams{UserID: uid, Kind: jobs.KindReport, State: jobs.StateUploaded, Payload: payload})
 		if err != nil {
@@ -416,7 +416,7 @@ func (s *Server) createReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listReports(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListReports(r.Context(), store.ListReportsParams{UserID: UserID(r.Context()), Limit: 100})
+	rows, err := s.qry(r).ListReports(r.Context(), store.ListReportsParams{UserID: UserID(r.Context()), Limit: 100})
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -429,7 +429,7 @@ func (s *Server) listReports(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) downloadReport(w http.ResponseWriter, r *http.Request) {
-	rp, err := s.q.GetReport(r.Context(), store.GetReportParams{ID: chi.URLParam(r, "id"), UserID: UserID(r.Context())})
+	rp, err := s.qry(r).GetReport(r.Context(), store.GetReportParams{ID: chi.URLParam(r, "id"), UserID: UserID(r.Context())})
 	if err != nil {
 		writeProblem(w, r, err)
 		return
