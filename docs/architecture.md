@@ -64,4 +64,4 @@
 - CORS only for `FRONTEND_ORIGIN`; uploads capped at `MAX_UPLOAD_MB` with content sniffing (text or XLSX zip only).
 - Rate limits per IP (auth endpoints tighter) and per user; Redis-backed with an in-memory fallback.
 - PAN is only ever stored as a salted hash. Logs carry request and user IDs, never file contents, emails or tokens.
-- `audit_log` is append-only by convention now; the role grants that enforce it land with row-level security in Phase 4.
+- Row-level security is forced on every user-owned table (migration 00003). The API connects as the login role and switches each connection to the non-owner role `taxpl_app`; `requireAuth` binds the request's pooled connection to `app.user_id`, and every worker transaction sets it with `set_config(..., true)`. A `taxpl_system` role with BYPASSRLS runs the cross-user raw-file purge and River's own migrations. `taxpl_app` has no UPDATE/DELETE on `audit_log`. `TestIntegrationRowLevelSecurity` proves the isolation.

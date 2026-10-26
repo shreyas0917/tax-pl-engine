@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSyncExternalStore } from 'react'
 import type { components } from './schema'
-import { api, unwrap, uploadFile } from './client'
+import { API_V1, ApiError, api, createAuthFetch, problemFromResponse, unwrap, uploadFile } from './client'
 import { sessionFromToken, sessionStore, type Session } from './auth'
 
 export type Rule = components['schemas']['Rule']
@@ -238,6 +238,22 @@ export function useResolveReviewItem() {
 export function useCreateReport() {
   return useMutation({
     mutationFn: (body: components['schemas']['CreateReportRequest']) => unwrap(api.POST('/reports', { body })),
+  })
+}
+
+export function useSetPan() {
+  const qc = useQueryClient()
+  return useMutation({
+    // TODO: POST /me/pan is not in openapi.yaml yet; switch to api.POST once the spec is updated and gen:api re-run.
+    mutationFn: async (pan: string) => {
+      const res = await createAuthFetch()(`${API_V1}/me/pan`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pan }),
+      })
+      if (!res.ok) throw new ApiError(res.status, await problemFromResponse(res))
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.me }),
   })
 }
 

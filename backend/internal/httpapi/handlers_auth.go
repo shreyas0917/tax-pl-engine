@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/go-chi/chi/v5"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -223,6 +224,32 @@ func (s *Server) deleteMe(w http.ResponseWriter, r *http.Request) {
 	s.setRefreshCookie(w, "", time.Unix(0, 0))
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// setPAN stores only a salted hash of the PAN (spec Section 13).
+func (s *Server) setPAN(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PAN string `json:"pan"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeProblem(w, r, err)
+		return
+	}
+	pan := strings.ToUpper(strings.TrimSpace(body.PAN))
+	if !panRe.MatchString(pan) {
+		writeProblem(w, r, validation(map[string]string{"pan": "a PAN looks like ABCDE1234F"}))
+		return
+	}
+	uid := UserID(r.Context())
+	hash := auth.HashPAN(pan, s.cfg.JWTSecret)
+	if err := s.qry(r).SetPANHash(r.Context(), store.SetPANHashParams{ID: uid, PanHash: &hash}); err != nil {
+		writeProblem(w, r, err)
+		return
+	}
+	_ = s.qry(r).InsertAudit(r.Context(), store.InsertAuditParams{UserID: &uid, Entity: "user", EntityID: uid, Action: "set_pan_hash"})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+var panRe = regexp.MustCompile(`^[A-Z]{5}[0-9]{4}[A-Z]$`)
 
 // --- accounts -----------------------------------------------------------------------------
 

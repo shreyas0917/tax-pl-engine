@@ -82,6 +82,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/me", s.me)
 			r.Delete("/me", s.deleteMe)
 			r.Post("/me/password", s.changePassword)
+			r.Post("/me/pan", s.setPAN)
 
 			r.Get("/accounts", s.listAccounts)
 			r.Post("/accounts", s.createAccount)

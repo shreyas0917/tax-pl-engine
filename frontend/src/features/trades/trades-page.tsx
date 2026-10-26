@@ -14,6 +14,7 @@ import { EmptyState, ErrorState } from '@/components/ui/states'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { brokerLabel, formatDate, formatINR, formatInt, formatQty, originLabel } from '@/lib/format'
 import { useYear } from '@/lib/year'
+import { ReconcilePanel } from './reconcile-panel'
 
 const ALL = '__all__'
 
@@ -182,6 +183,9 @@ export function HoldingsPage() {
     <>
       <PageHeader title="Holdings" lede="Open lots after the latest computation, per account. Compare them with your broker's holdings to spot missing history." />
       <TradesTabs value="holdings" />
+      <div className="mb-6">
+        <ReconcilePanel />
+      </div>
       {holdings.isLoading && (
         <Section>
           <TableSkeleton rows={6} cols={6} />

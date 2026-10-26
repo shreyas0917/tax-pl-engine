@@ -3,12 +3,13 @@ import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router'
 import { z } from 'zod'
 import { errorMessage, isApiError } from '@/api/client'
-import { useAccounts, useBrokers, useChangePassword, useDeleteAccount, useDeleteMe, useLogout, useSession } from '@/api/hooks'
+import { useAccounts, useBrokers, useChangePassword, useDeleteAccount, useDeleteMe, useLogout, useMe, useSession, useSetPan } from '@/api/hooks'
 import { PageHeader, Section } from '@/components/layout/page'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Dialog } from '@/components/ui/sheet'
+import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { InlineError } from '@/components/ui/states'
 import { NewAccountForm } from '@/features/upload/upload-page'
@@ -22,6 +23,7 @@ export function SettingsPage() {
       <PageHeader title="Settings" lede={session ? `Signed in as ${session.user.email}.` : undefined} />
       <div className="space-y-6">
         <AccountsSection />
+        <PanSection />
         <PasswordSection />
         <DangerSection />
       </div>
@@ -81,6 +83,58 @@ function AccountsSection() {
           </Button>
         </div>
       </Dialog>
+    </Section>
+  )
+}
+
+const panSchema = z.object({
+  pan: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, 'A PAN looks like ABCDE1234F: five letters, four digits, one letter'),
+})
+type PanValues = z.infer<typeof panSchema>
+
+function PanSection() {
+  const me = useMe()
+  const setPan = useSetPan()
+  const form = useForm<PanValues>({ resolver: zodResolver(panSchema), defaultValues: { pan: '' } })
+  const [saved, setSaved] = useState(false)
+
+  const submit = form.handleSubmit((v) =>
+    setPan.mutate(v.pan, {
+      onSuccess: () => {
+        setSaved(true)
+        form.reset()
+      },
+      onError: (e) => {
+        if (isApiError(e) && e.errors.pan) form.setError('pan', { type: 'server', message: e.errors.pan })
+      },
+    }),
+  )
+
+  return (
+    <Section title="PAN (optional)" aside={me.data?.pan_on_file ? <Badge tone="gain">PAN on file</Badge> : undefined}>
+      <form onSubmit={submit} noValidate className="grid gap-4 p-4 sm:max-w-md sm:p-5">
+        <p className="text-sm text-muted">Only a salted hash of your PAN is stored; the number itself never leaves this form. It lets reports carry a verifiable identity for your CA.</p>
+        <Field label={me.data?.pan_on_file ? 'Replace PAN' : 'PAN'} hint="Ten characters, for example ABCDE1234F." error={form.formState.errors.pan?.message}>
+          {({ id, describedBy, invalid }) => (
+            <Input id={id} autoComplete="off" autoCapitalize="characters" maxLength={10} className="uppercase" aria-describedby={describedBy} aria-invalid={invalid} data-testid="pan-input" {...form.register('pan')} />
+          )}
+        </Field>
+        {setPan.isError && !(isApiError(setPan.error) && setPan.error.errors.pan) && <InlineError message={errorMessage(setPan.error)} />}
+        {saved && (
+          <p role="status" className="text-sm text-gain">
+            PAN saved.
+          </p>
+        )}
+        <div>
+          <Button type="submit" variant="primary" disabled={setPan.isPending}>
+            {setPan.isPending ? 'Saving' : 'Save PAN'}
+          </Button>
+        </div>
+      </form>
     </Section>
   )
 }

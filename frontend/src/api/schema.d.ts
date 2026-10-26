@@ -639,10 +639,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/holdings/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compare a broker holdings statement with the engine's open lots
+         * @description Upload the broker's current holdings CSV for one account. The engine compares it with its open lots and names every difference with a suggested fix. Differences usually mean missing history (shares bought before the first uploaded tradebook), a missing sale or transfer, or an average price that disagrees by more than 1%.
+         */
+        post: operations["reconcileHoldings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/pan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Store the user's PAN as a salted hash
+         * @description The PAN is never stored in clear; only a salted SHA-256 hash is kept so reports can be matched to a filing without exposing the number.
+         */
+        post: operations["setPAN"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ReconcileDifference: {
+            isin: string;
+            symbol: string;
+            broker_quantity: components["schemas"]["Decimal"];
+            engine_quantity: components["schemas"]["Decimal"];
+            /** @description broker minus engine */
+            delta: components["schemas"]["Decimal"];
+            broker_avg_price: components["schemas"]["Decimal"];
+            engine_avg_cost: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            kind: "MISSING_HISTORY" | "EXTRA_IN_ENGINE" | "QUANTITY_MISMATCH" | "COST_MISMATCH";
+            suggestion: string;
+        };
+        ReconcileResult: {
+            account_id: components["schemas"]["UUID"];
+            matched: number;
+            differences: components["schemas"]["ReconcileDifference"][];
+            issues: {
+                line?: number;
+                reason?: string;
+                row?: string;
+            }[];
+        };
         /**
          * @description Arbitrary-precision decimal encoded as a JSON string (shopspring/decimal), e.g.
          *     `"1234.5000"` or `"-12.5"`. Never a JSON number. Clients must parse it with a decimal
@@ -2687,6 +2750,66 @@ export interface operations {
                     "application/json": components["schemas"]["Readiness"];
                 };
             };
+        };
+    };
+    reconcileHoldings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description Holdings CSV with a quantity column and an ISIN or symbol column (Zerodha, Groww, Upstox and Angel One headings are recognised).
+                     */
+                    file: string;
+                    account_id: components["schemas"]["UUID"];
+                };
+            };
+        };
+        responses: {
+            /** @description Reconciliation result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcileResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    setPAN: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example ABCDE1234F */
+                    pan: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Stored */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationFailed"];
         };
     };
 }

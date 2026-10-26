@@ -1078,6 +1078,62 @@ paths:
           description: Returned only when the route is served from a different mount; the body is not a Problem document.
 
 # ====================================================================== components
+  /holdings/reconcile:
+    post:
+      tags: [Holdings]
+      operationId: reconcileHoldings
+      summary: Compare a broker holdings statement with the engine's open lots
+      description: Upload the broker's current holdings CSV for one account. The engine compares it with its open lots and names every difference with a suggested fix. Differences usually mean missing history (shares bought before the first uploaded tradebook), a missing sale or transfer, or an average price that disagrees by more than 1%.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, account_id]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Holdings CSV with a quantity column and an ISIN or symbol column (Zerodha, Groww, Upstox and Angel One headings are recognised).
+                account_id:
+                  $ref: '#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Reconciliation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconcileResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /me/pan:
+    post:
+      tags: [Account]
+      operationId: setPAN
+      summary: Store the user's PAN as a salted hash
+      description: The PAN is never stored in clear; only a salted SHA-256 hash is kept so reports can be matched to a filing without exposing the number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pan]
+              properties:
+                pan:
+                  type: string
+                  pattern: '^[A-Z]{5}[0-9]{4}[A-Z]$'
+                  example: ABCDE1234F
+      responses:
+        '204':
+          description: Stored
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
 components:
   securitySchemes:
     bearerAuth:
@@ -1339,6 +1395,38 @@ components:
         job_id: 7c1f3f0e-2a7b-4f8e-9a2b-0d4c1b6e5f10
 
   schemas:
+    ReconcileDifference:
+      type: object
+      required: [isin, symbol, broker_quantity, engine_quantity, delta, broker_avg_price, engine_avg_cost, kind, suggestion]
+      properties:
+        isin: { type: string }
+        symbol: { type: string }
+        broker_quantity: { $ref: '#/components/schemas/Decimal' }
+        engine_quantity: { $ref: '#/components/schemas/Decimal' }
+        delta: { $ref: '#/components/schemas/Decimal', description: broker minus engine }
+        broker_avg_price: { $ref: '#/components/schemas/Decimal' }
+        engine_avg_cost: { $ref: '#/components/schemas/Decimal' }
+        kind:
+          type: string
+          enum: [MISSING_HISTORY, EXTRA_IN_ENGINE, QUANTITY_MISMATCH, COST_MISMATCH]
+        suggestion: { type: string }
+    ReconcileResult:
+      type: object
+      required: [account_id, matched, differences, issues]
+      properties:
+        account_id: { $ref: '#/components/schemas/UUID' }
+        matched: { type: integer }
+        differences:
+          type: array
+          items: { $ref: '#/components/schemas/ReconcileDifference' }
+        issues:
+          type: array
+          items:
+            type: object
+            properties:
+              line: { type: integer }
+              reason: { type: string }
+              row: { type: string }
     # ------------------------------------------------------------ primitives
     Decimal:
       type: string
