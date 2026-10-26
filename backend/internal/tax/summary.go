@@ -90,6 +90,7 @@ func Summarise(fy string, gains []domain.Gain) (Summary, error) {
 		return Summary{}, err
 	}
 	s := Summary{FY: fy, YearLabel: r.YearLabel, Law: r.Law, RulesVersion: r.VersionString(), VerifiedBy: r.VerifiedBy,
+		Categories: []CategoryTotal{}, Accounts: []AccountTotal{}, Periods: []PeriodTotal{}, Losses: []LossLine{}, EstimateNotes: []string{},
 		AuditThreshold: r.FNO.AuditThreshold, AuditThresholdLowCash: r.FNO.AuditThresholdLowCash, LTCGExemption: r.Equity.LTCGExemption,
 		References: r.References}
 	cats := map[domain.Category]*CategoryTotal{}

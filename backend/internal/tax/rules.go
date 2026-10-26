@@ -21,10 +21,10 @@ var rulesFS embed.FS
 
 // RatePeriod is a date range with its STCG/LTCG rates. Rates changed on 23 Jul 2024.
 type RatePeriod struct {
-	From     domain.Date     `yaml:"from"`
-	To       domain.Date     `yaml:"to"`
-	STCGRate decimal.Decimal `yaml:"stcg_rate"`
-	LTCGRate decimal.Decimal `yaml:"ltcg_rate"`
+	From     domain.Date     `yaml:"from" json:"from"`
+	To       domain.Date     `yaml:"to" json:"to"`
+	STCGRate decimal.Decimal `yaml:"stcg_rate" json:"stcg_rate"`
+	LTCGRate decimal.Decimal `yaml:"ltcg_rate" json:"ltcg_rate"`
 }
 
 // Label is the stable identifier of the period ("2024-07-23..2025-03-31").

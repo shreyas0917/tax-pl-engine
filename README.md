@@ -2,7 +2,7 @@
 
 Consolidates tradebooks from several Indian brokers (Zerodha, Groww, Upstox, Angel One) into one FIFO-matched, fully explained capital-gains and business-income report for the ITR.
 
-> **Status:** Phase 1 complete: the core engine runs as a CLI with 34 hand-verified golden cases and property tests. Phase 2 (API, database, background jobs) is in progress. See [TAXPL_BUILD_SPEC.md](TAXPL_BUILD_SPEC.md) for the full build plan.
+> **Status:** Phase 2 complete: REST API, Postgres schema, River job pipeline, four broker parsers, Docker-backed integration tests. Phase 3 (frontend, Excel/PDF reports) is next. See [TAXPL_BUILD_SPEC.md](TAXPL_BUILD_SPEC.md) for the full build plan.
 
 ## The problem
 
@@ -10,7 +10,7 @@ Traders in India commonly use two or three broker apps. Each gives its own tax P
 
 ## What it does
 
-- Parses broker tradebooks (Zerodha now; Groww, Upstox and Angel One in Phase 2) into one normalised trade format, reporting every rejected row with its line number.
+- Parses **Zerodha, Groww, Upstox and Angel One** tradebooks (CSV or XLSX) into one normalised trade format, auto-detecting the broker and reporting every rejected row with its line number. See [docs/adding-a-broker.md](docs/adding-a-broker.md).
 - Applies splits, bonuses, demergers and mergers to lots on their ex-date.
 - Matches every sale FIFO **per demat account** (CBDT Circular 768) with partial-lot consumption and same-day intraday netting.
 - Classifies every gain: STCG, LTCG, intraday (speculative), F&O (non-speculative), buyback (three dated regimes).
@@ -26,6 +26,8 @@ Traders in India commonly use two or three broker apps. Each gives its own tax P
 - **Replay**: every golden case runs twice and asserts a byte-identical report checksum.
 - **No floats**: a test fails the build if `float32`/`float64` appears in any pure engine package; money is `shopspring/decimal` end to end.
 - **Rules are data with sources**: [docs/tax-rules.md](docs/tax-rules.md) lists every rule, its statutory or practitioner source and the test that proves it. Each rules file has a `verified_by` field for the CA's sign-off.
+- **Reliability is tested against a real Postgres** (testcontainers): uploading the same file twice adds nothing; a worker interrupted mid-recompute leaves no partial state and the retry completes; three uploads processed concurrently equal three processed one by one; raw files are purged after the TTL while trades stay; "delete my data" removes every row and blob. Run with `make test-integration`.
+- **API contract first**: [backend/api/openapi.yaml](backend/api/openapi.yaml) (OpenAPI 3.1, lint-clean) is the single source for the generated frontend types.
 
 ## Try the CLI
 
@@ -49,9 +51,11 @@ make web       # frontend
 
 `make check` runs lint plus every test (no Docker needed for the engine tests).
 
-## Architecture decisions
+## Architecture
 
-See [docs/adr/](docs/adr/): FIFO per demat account, rules as versioned data, the holding-period boundary, and the pure-engine / deterministic-replay design.
+Pure Go engine (parser → normalize → corporate actions → FIFO matcher → tax rules → explain) wrapped by a chi API and River workers on Postgres, with Redis for rate limits and idempotency keys and a local-or-S3 blob store. Every stage commits its output and the next job in one transaction; progress streams to the browser over SSE. Details and diagram: [docs/architecture.md](docs/architecture.md). Decisions: [docs/adr/](docs/adr/) (FIFO per account, rules as data, holding-period boundary, pure engine, River over Kafka, sqlc over ORM, blob drivers).
+
+Windows note: `make` is not bundled with Git Bash; install it with `winget install GnuWin32.Make` and add `C:\Program Files (x86)\GnuWin32in` to PATH, or run the commands from the Makefile directly.
 
 ## Disclaimer
 

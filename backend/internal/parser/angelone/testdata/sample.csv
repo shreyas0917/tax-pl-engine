@@ -1,0 +1,6 @@
+Scrip/Contract,Buy/Sell,Buy Price,Sell Price,Quantity,Brokerage,Order Type,Segment,Date,GST,STT,SEBI Tax,Exchange Turnover Charges,Stamp Duty,Other Charges,IPFT charges
+INFY,Buy,1400.5,0,10,20,Delivery,Capital,03-06-2024,3.6,14.01,0.01,0.46,2.1,0,0
+INFY,Sell,0,"1,500.00",10,20,Delivery,Capital,10-02-2025,3.6,15,0.02,0.49,0,0,0
+NIFTY 27JUN24 23000 CE,Buy,100,0,50,20,Normal,F&O,03-06-2024,3.6,0,0.01,2.5,0.15,0,0
+BANKNIFTY 26JUN2024 FUT,Sell,0,50000,15,20,Normal,F&O,03-06-2024,3.6,93.75,0.08,14.6,0,0,0
+TCS,Hold,100,0,1,20,Delivery,Capital,04-06-2024,0,0,0,0,0,0,0

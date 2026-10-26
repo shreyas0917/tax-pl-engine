@@ -1,0 +1,2658 @@
+openapi: 3.1.0
+info:
+  title: Tax P&L Engine API
+  version: 1.0.0
+  summary: REST API for the Tax P&L Engine (Indian equity, intraday and F&O tax computation).
+  description: |
+    The Tax P&L Engine ingests broker tradebooks (CSV/XLSX), normalises them, applies corporate
+    actions, matches lots FIFO and classifies every sale into Indian income-tax buckets
+    (STCG/LTCG on STT-paid equity, intraday speculative business, F&O non-speculative business,
+    buybacks) using versioned per-year rule files. It then produces summaries, "why this number"
+    explanations and downloadable reports.
+
+    **Disclaimer:** this service organises your trade data; it is **not tax advice**. Every figure
+    it produces is an estimate that must be verified with a qualified Chartered Accountant before
+    filing.
+
+    ### Conventions
+    * All money and quantity values are **decimal strings** (e.g. `"1234.5000"`), never JSON
+      numbers, so no precision is lost. See the `Decimal` schema.
+    * Dates are `YYYY-MM-DD` strings (`Date` schema); timestamps are RFC 3339 (`date-time`).
+    * Errors are RFC 9457 `application/problem+json` documents (`Problem` schema).
+    * Authenticated requests send `Authorization: Bearer <access_token>`; the access token is a
+      short-lived JWT (15 minutes by default). A rotating refresh token is kept in the httpOnly
+      cookie `taxpl_refresh` (path `/api/v1/auth`, SameSite=Lax, Secure outside dev).
+    * Rate limits (fixed one-minute windows): 120 requests/minute per IP on everything under
+      `/api/v1`, 20/minute per IP on `/auth/*`, 300/minute per user on authenticated routes.
+      Exceeding a limit yields `429` with a `Retry-After: 60` header.
+    * POST requests on authenticated routes may send an `Idempotency-Key` header; a repeat with
+      the same key (per user and path) within 24 hours replays the stored response with the
+      header `Idempotent-Replayed: true`.
+    * Requests time out after 120 seconds.
+    * CORS is allowed only for the configured frontend origin; `Content-Disposition` is exposed.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  contact:
+    name: Tax P&L Engine
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development server (versioned API root)
+
+tags:
+  - name: Auth
+    description: Registration, login and refresh-token session management. Public (no bearer token).
+  - name: Me
+    description: The authenticated user's profile, password and account deletion.
+  - name: Accounts
+    description: Demat/broker accounts that uploads are attached to.
+  - name: Uploads
+    description: Tradebook file uploads. Each upload starts a PROCESS_UPLOAD job.
+  - name: Jobs
+    description: Background pipeline jobs (upload processing, recompute, report generation) and their event streams.
+  - name: Review
+    description: Items the engine could not decide on its own and needs the user to answer.
+  - name: Summary
+    description: Per-financial-year tax totals and estimates.
+  - name: Gains
+    description: Classified gain lines and their explanations.
+  - name: Trades
+    description: Normalised trades, open holdings and manual trade entry.
+  - name: Reports
+    description: Generated XLSX/PDF/JSON reports.
+  - name: Reference
+    description: Public reference data (tax rules per year, supported brokers).
+  - name: Health
+    description: Liveness and readiness probes served at the server root (not under /api/v1).
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------------------------------------------------------- auth
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Register a new user
+      description: |
+        Creates a user with the given email and password and immediately issues a session:
+        the response body carries the access token and the `taxpl_refresh` httpOnly cookie carries
+        the refresh token. Email is lower-cased and must be a valid address (max 254 chars).
+        Password must be 10-200 characters with at least one letter and one digit.
+      security: []
+      requestBody:
+        $ref: '#/components/requestBodies/Credentials'
+      responses:
+        '201':
+          description: User created and session issued.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Log in with email and password
+      description: |
+        Verifies the credentials and issues a session (access token in the body, refresh token in
+        the `taxpl_refresh` cookie). Wrong email or password yields `401` with the detail
+        `email or password is incorrect`; the response does not reveal whether the email exists.
+      security: []
+      requestBody:
+        $ref: '#/components/requestBodies/Credentials'
+      responses:
+        '200':
+          description: Session issued.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: Rotate the refresh token and issue a new access token
+      description: |
+        Reads the `taxpl_refresh` cookie, revokes that refresh token and issues a fresh pair
+        (new access token in the body, new refresh token in the cookie). No request body.
+        Missing, unknown, revoked or expired refresh tokens yield `401`.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RefreshCookie'
+      responses:
+        '200':
+          description: New session issued; the previous refresh token is now revoked.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Log out
+      description: |
+        Revokes the refresh token in the `taxpl_refresh` cookie (if any) and clears the cookie.
+        Always succeeds, even without a cookie. The access token stays valid until it expires;
+        clients should discard it.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RefreshCookie'
+      responses:
+        '204':
+          description: Logged out; cookie cleared.
+          headers:
+            Set-Cookie:
+              description: Clears the `taxpl_refresh` cookie (empty value, expiry in the past).
+              schema:
+                type: string
+                example: taxpl_refresh=; Path=/api/v1/auth; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ---------------------------------------------------------------- me
+  /me:
+    get:
+      tags: [Me]
+      operationId: getMe
+      summary: Get the current user and some counters
+      responses:
+        '200':
+          description: The user plus counts of accounts, trades and open review items.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Me]
+      operationId: deleteMe
+      summary: Delete the user and everything they own
+      description: |
+        Permanently deletes the user, their accounts, uploads, trades, lots, gains, review items,
+        reports and sessions. Requires the current password and the literal confirmation
+        `"DELETE"` (case-insensitive, whitespace trimmed). A wrong password or missing
+        confirmation yields `422` with `errors.password`. Clears the refresh cookie on success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteMeRequest'
+      responses:
+        '204':
+          description: User and all data deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /me/password:
+    post:
+      tags: [Me]
+      operationId: changePassword
+      summary: Change the password
+      description: |
+        Verifies `current_password`, validates `new_password` (10-200 characters, at least one
+        letter and one digit), stores the new hash and **revokes all refresh tokens** for the user.
+        The caller must log in again afterwards to obtain a new refresh cookie.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '204':
+          description: Password changed; all refresh tokens revoked.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------- accounts
+  /accounts:
+    get:
+      tags: [Accounts]
+      operationId: listAccounts
+      summary: List the user's demat accounts
+      responses:
+        '200':
+          description: All accounts owned by the user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Accounts]
+      operationId: createAccount
+      summary: Create a demat account
+      description: |
+        `broker` is lower-cased and trimmed (1-40 chars; e.g. `zerodha`, `groww`, `upstox`,
+        `angelone` or `other`). `nickname` is trimmed (1-60 chars). The pair (broker, nickname)
+        must be unique per user.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+      responses:
+        '201':
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /accounts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    delete:
+      tags: [Accounts]
+      operationId: deleteAccount
+      summary: Delete a demat account
+      description: |
+        Deletes the account and (via cascade) its uploads and trades, then enqueues a RECOMPUTE
+        job. The recompute job's ID is not returned; watch `GET /jobs` for the newest job.
+      responses:
+        '204':
+          description: Account deleted and recompute queued.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------- uploads
+  /uploads:
+    post:
+      tags: [Uploads]
+      operationId: createUpload
+      summary: Upload a tradebook file
+      description: |
+        Accepts a `multipart/form-data` body with the tradebook `file` (CSV or XLSX; the content
+        is sniffed, so the file must be text or a ZIP container with a `.xlsx` extension), the
+        target `account_id` and an optional `broker` name. When `broker` is omitted it is
+        auto-detected from CSV content; XLSX files always need an explicit broker.
+
+        Uploads are content-addressed by SHA-256 per user: re-uploading a file that was already
+        uploaded returns the **existing** upload with `duplicate: true` and HTTP `200` instead of
+        `201`, and does not start a new job. The maximum size is `MAX_UPLOAD_MB` (default 20 MB);
+        larger files (or an unparseable multipart body) yield `413`.
+
+        On success a `PROCESS_UPLOAD` job is created in state `UPLOADED`; its ID is in `job_id`.
+        Follow progress with `GET /jobs/{id}/events`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+            encoding:
+              file:
+                contentType: text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        '201':
+          description: New upload stored and processing job queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+              examples:
+                created:
+                  $ref: '#/components/examples/UploadCreated'
+        '200':
+          description: 'The same content was uploaded before; the existing upload is returned with `duplicate: true`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+              examples:
+                duplicate:
+                  $ref: '#/components/examples/UploadDuplicate'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Uploads]
+      operationId: listUploads
+      summary: List uploads
+      description: |
+        The 100 most recent uploads. For each upload, `job_id` and `status` reflect the **latest**
+        job created for that upload (so `status` is a `JobState`), falling back to the upload row's
+        own status when no job exists.
+      responses:
+        '200':
+          description: Uploads, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------- jobs
+  /jobs:
+    get:
+      tags: [Jobs]
+      operationId: listJobs
+      summary: List recent jobs
+      description: The 50 most recent jobs for the user, newest first.
+      responses:
+        '200':
+          description: Recent jobs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Jobs]
+      operationId: getJob
+      summary: Get a job and its full event history
+      responses:
+        '200':
+          description: The job with all of its events in insertion order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /jobs/{id}/events:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Jobs]
+      operationId: streamJobEvents
+      summary: Stream job events (Server-Sent Events)
+      description: |
+        Streams the job's events as `text/event-stream`. The server polls every 700 ms, sends a
+        `: keep-alive` comment line on each idle tick, and closes the stream after a terminal
+        state or after 10 minutes (reconnect to continue).
+
+        Each stored event is sent as:
+
+        ```
+        id: <event id>
+        event: state
+        data: <JobEvent JSON>
+        ```
+
+        When a terminal state (`REPORT_READY`, `NEEDS_REVIEW`, `FAILED`) is reached one final
+        message follows and the stream ends:
+
+        ```
+        event: done
+        data: {"state":"REPORT_READY"}
+        ```
+
+        **Resuming:** send the `Last-Event-ID` header (what `EventSource` does automatically on
+        reconnect) or the `last_event_id` query parameter; only events with a greater `id` are sent.
+
+        **Authentication:** `EventSource` cannot set headers, so this endpoint alone also accepts
+        the access token as the `access_token` query parameter instead of the `Authorization`
+        header.
+      security:
+        - bearerAuth: []
+        - accessTokenQuery: []
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: ID of the last event already received; the stream resumes after it. Takes precedence over `last_event_id`.
+          schema:
+            type: integer
+            format: int64
+            example: 42
+        - name: last_event_id
+          in: query
+          required: false
+          description: Query-string alternative to the `Last-Event-ID` header for clients that cannot set headers.
+          schema:
+            type: integer
+            format: int64
+            example: 42
+        - name: access_token
+          in: query
+          required: false
+          description: Access token (JWT) for clients that cannot send an `Authorization` header. Only honoured on this endpoint.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: |
+            An SSE stream. `state` events carry a `JobEvent` JSON document as `data`; the
+            final `done` event carries `{"state": "<terminal JobState>"}`.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-cache
+            X-Accel-Buffering:
+              description: Disables proxy buffering so events are delivered immediately.
+              schema:
+                type: string
+                const: 'no'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE stream; see the operation description for the event framing.
+              example: |
+                id: 17
+                event: state
+                data: {"id":17,"state":"PARSING","message":"Parsing zerodha tradebook","at":"2026-10-26T09:30:01Z"}
+
+                : keep-alive
+
+                id: 18
+                event: state
+                data: {"id":18,"state":"REPORT_READY","message":"Computed 312 gains","detail":{"gains":312},"at":"2026-10-26T09:30:04Z"}
+
+                event: done
+                data: {"state":"REPORT_READY"}
+
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------- review items
+  /review-items:
+    get:
+      tags: [Review]
+      operationId: listReviewItems
+      summary: List review items
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by status. Omit to return items in every status.
+          schema:
+            $ref: '#/components/schemas/ReviewStatus'
+      responses:
+        '200':
+          description: Review items.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewItemList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /review-items/{id}/resolve:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Review item ID.
+        schema:
+          $ref: '#/components/schemas/UUID'
+    post:
+      tags: [Review]
+      operationId: resolveReviewItem
+      summary: Answer or dismiss a review item
+      description: |
+        Applies the user's answer, marks the item `resolved` (or `dismissed`) and queues a
+        recompute. The item must be `open`; otherwise `409`. The body depends on the item's `kind`:
+
+        | kind | body |
+        |---|---|
+        | any kind | `{"dismiss": true}` marks the item dismissed without changes |
+        | `MISSING_BUY_HISTORY` | `{"acquisition_date": "2019-03-01", "cost_total": "12345.00", "quantity": "10"}` creates an opening lot. `quantity` defaults to the item's `payload.quantity`. |
+        | `MISSING_FMV_2018` | `{"fmv": "605.00"}` records the 31 Jan 2018 FMV per unit for the ISIN |
+        | `UNKNOWN_ISIN` | `{"isin": "INE009A01021"}` maps the symbol to the ISIN and re-parses the upload that raised the item |
+        | `TRANSFER_DETAILS` | `{"acquisition_date": "2019-03-01", "cost_total": "12345.00"}` sets the original acquisition facts on the transfer-in trade |
+        | `PARSE_ISSUE`, `OPEN_FNO_POSITION`, `BUYBACK_DEEMED_DIVIDEND` | can only be dismissed; anything else yields `400` |
+
+        Unknown JSON fields are rejected with `400`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveReviewItemRequest'
+            examples:
+              dismiss:
+                summary: Dismiss any item
+                value: { dismiss: true }
+              missingBuyHistory:
+                summary: MISSING_BUY_HISTORY
+                value: { acquisition_date: '2019-03-01', cost_total: '12345.00', quantity: '10' }
+              missingFmv2018:
+                summary: MISSING_FMV_2018
+                value: { fmv: '605.00' }
+              unknownIsin:
+                summary: UNKNOWN_ISIN
+                value: { isin: INE009A01021 }
+              transferDetails:
+                summary: TRANSFER_DETAILS
+                value: { acquisition_date: '2019-03-01', cost_total: '12345.00' }
+      responses:
+        '200':
+          description: Item resolved or dismissed; a recompute (or re-parse) job was queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolveReviewItemResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------- summary
+  /summary:
+    get:
+      tags: [Summary]
+      operationId: getSummary
+      summary: Financial-year tax summary
+      description: |
+        Totals, per-period rates, loss set-off lines and a deliberately simple tax **estimate**
+        for one financial year, computed from the stored gain lines. `fy` is required and must
+        have a rules file (see `GET /rules`).
+
+        Note: `summary.accounts[].account_id` holds the account **nickname** (display name) when
+        one is known, not the UUID.
+      parameters:
+        - $ref: '#/components/parameters/FYRequired'
+      responses:
+        '200':
+          description: The summary plus metadata about the latest computation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummaryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------- gains
+  /gains:
+    get:
+      tags: [Gains]
+      operationId: listGains
+      summary: List gain lines for a financial year (cursor paginated)
+      description: |
+        Gain lines ordered by sale date. Page through with `cursor` / `next_cursor`; an empty
+        `next_cursor` means the last page. Filters are exact matches; `isin` is upper-cased.
+      parameters:
+        - $ref: '#/components/parameters/FYRequired'
+        - name: category
+          in: query
+          required: false
+          description: Only gains in this tax category.
+          schema:
+            $ref: '#/components/schemas/Category'
+        - $ref: '#/components/parameters/AccountFilter'
+        - $ref: '#/components/parameters/IsinFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of gains.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GainPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /gains/{id}/explain:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Gain line ID.
+        schema:
+          type: string
+    get:
+      tags: [Gains]
+      operationId: explainGain
+      summary: Explain how a gain line was derived
+      description: |
+        Returns the "why this number" tree for one gain: the sale trade, the matched lot(s) with
+        their acquisition, corporate-action adjustments and grandfathering comparison (equity), or
+        the opening and closing trades (intraday / F&O), plus the human-readable derivation steps.
+      responses:
+        '200':
+          description: The explanation tree.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExplainTree'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------- trades / holdings
+  /trades:
+    get:
+      tags: [Trades]
+      operationId: listTrades
+      summary: List normalised trades (cursor paginated)
+      description: |
+        Trades ordered by trade date. `fy` is optional here; when given, only trades inside that
+        financial year (1 April - 31 March) are returned and the value must parse as `YYYY-YY`.
+      parameters:
+        - $ref: '#/components/parameters/FYOptional'
+        - $ref: '#/components/parameters/AccountFilter'
+        - $ref: '#/components/parameters/IsinFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of trades.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /holdings:
+    get:
+      tags: [Trades]
+      operationId: listHoldings
+      summary: List open lots (current holdings)
+      description: Every lot with quantity still open after the latest computation.
+      responses:
+        '200':
+          description: Open lots.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldingList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /trades/manual:
+    post:
+      tags: [Trades]
+      operationId: addManualTrade
+      summary: Record a manual trade (buyback tender or off-market transfer)
+      description: |
+        Adds an equity trade that tradebooks omit and queues a recompute. `side` is derived for
+        special kinds (`BUYBACK` and `TRANSFER_OUT` are always `SELL`, `TRANSFER_IN` is always
+        `BUY`) and required only for `REGULAR`. For `TRANSFER_IN`, `original_acquisition_date` and
+        `original_cost` (total for the quantity) may be supplied so the holding period and cost
+        carry over. `symbol` defaults to the ISIN. `price` defaults to `"0"`.
+
+        The trade ID is a deterministic hash of (account, kind, side, ISIN, quantity, price, date),
+        so submitting the identical trade twice yields the same `trade_id`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualTradeRequest'
+      responses:
+        '201':
+          description: Trade stored and recompute queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManualTradeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------- reports
+  /reports:
+    post:
+      tags: [Reports]
+      operationId: createReport
+      summary: Request a report
+      description: |
+        Queues a `REPORT` job that renders the financial year's results in the requested format.
+        The response is `202` with the job ID; poll `GET /jobs/{id}` or stream
+        `GET /jobs/{id}/events`, then find the file in `GET /reports` and download it.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReportRequest'
+      responses:
+        '202':
+          description: Report generation queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateReportResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Reports]
+      operationId: listReports
+      summary: List generated reports
+      description: The 100 most recent finished reports, newest first.
+      responses:
+        '200':
+          description: Reports.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reports/{id}/download:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Report ID.
+        schema:
+          $ref: '#/components/schemas/UUID'
+    get:
+      tags: [Reports]
+      operationId: downloadReport
+      summary: Download a report file
+      description: |
+        Streams the report bytes. The `Content-Type` matches the report's format and
+        `Content-Disposition` names the file `taxpl-<fy>.<format>`. Verify the download against
+        `X-Checksum-SHA256`.
+      responses:
+        '200':
+          description: The report file.
+          headers:
+            Content-Disposition:
+              description: Attachment filename, `taxpl-<fy>.<format>`.
+              schema:
+                type: string
+                example: attachment; filename="taxpl-2025-26.xlsx"
+            X-Checksum-SHA256:
+              description: Hex SHA-256 of the file body.
+              schema:
+                type: string
+                pattern: '^[0-9a-f]{64}$'
+                example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+            X-Rules-Version:
+              description: Rules version the report was computed with, e.g. `fy2025-26@1`.
+              schema:
+                type: string
+                example: fy2025-26@1
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                description: JSON report; its structure is defined by the report writer, not by this contract.
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------- reference
+  /rules:
+    get:
+      tags: [Reference]
+      operationId: listRules
+      summary: List the tax rule sets by financial year
+      description: |
+        Public. One entry per embedded rules file (FY 2023-24 onward), with the equity rate
+        periods, the LTCG exemption and the F&O audit thresholds that the engine shows (never
+        decides on).
+
+        Note: `periods[]` is serialised from a Go struct without JSON tags, so its keys are
+        PascalCase (`From`, `To`, `STCGRate`, `LTCGRate`), unlike every other object in this API.
+      security: []
+      responses:
+        '200':
+          description: Rule sets, sorted by year.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleList'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /brokers:
+    get:
+      tags: [Reference]
+      operationId: listBrokers
+      summary: List supported broker parsers
+      description: Public. Lower-case broker names accepted by `POST /uploads` (`broker` field), sorted.
+      security: []
+      responses:
+        '200':
+          description: Broker names.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerList'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ---------------------------------------------------------------- health (server root)
+  /healthz:
+    servers:
+      - url: http://localhost:8080
+        description: Server root (health probes are not under /api/v1)
+    get:
+      tags: [Health]
+      operationId: healthz
+      summary: Liveness probe
+      description: Always `200` while the process is up. Not rate limited; not logged.
+      security: []
+      responses:
+        '200':
+          description: Alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '404':
+          description: Returned only when the route is served from a different mount; the body is not a Problem document.
+
+  /readyz:
+    servers:
+      - url: http://localhost:8080
+        description: Server root (health probes are not under /api/v1)
+    get:
+      tags: [Health]
+      operationId: readyz
+      summary: Readiness probe
+      description: |
+        Pings PostgreSQL and (when configured) Redis with a 3-second timeout. Returns `503` when
+        either is unreachable; the body always lists each dependency's state.
+      security: []
+      responses:
+        '200':
+          description: All dependencies reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+        '503':
+          description: At least one dependency is unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+              example:
+                database: unreachable
+                redis: ok
+        '404':
+          description: Returned only when the route is served from a different mount; the body is not a Problem document.
+
+# ====================================================================== components
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Short-lived access token from `/auth/login`, `/auth/register` or `/auth/refresh`, sent as
+        `Authorization: Bearer <token>`. Missing, malformed or expired tokens yield `401`.
+    accessTokenQuery:
+      type: apiKey
+      in: query
+      name: access_token
+      description: |
+        The same access token passed as a query parameter. Accepted **only** on
+        `GET /jobs/{id}/events`, because `EventSource` cannot set request headers.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Opaque client-chosen key (max 200 characters). A repeated POST with the same key on the
+        same path by the same user within 24 hours is not re-executed: the stored status and body
+        are replayed with the response header `Idempotent-Replayed: true`. Responses with status
+        5xx are not stored. Keys longer than 200 characters yield `400`.
+      schema:
+        type: string
+        maxLength: 200
+        example: 6d4f2c6a-3b1e-4b55-9d2a-0f5e9c1b7a11
+    RefreshCookie:
+      name: taxpl_refresh
+      in: cookie
+      required: false
+      description: |
+        Rotating refresh token set by `/auth/login`, `/auth/register` and `/auth/refresh`.
+        httpOnly, SameSite=Lax, path `/api/v1/auth`, Secure outside development; expires after
+        `REFRESH_TOKEN_DAYS` (default 30). Browsers send it automatically.
+      schema:
+        type: string
+    AccountId:
+      name: id
+      in: path
+      required: true
+      description: Demat account ID.
+      schema:
+        $ref: '#/components/schemas/UUID'
+    JobId:
+      name: id
+      in: path
+      required: true
+      description: Job ID.
+      schema:
+        $ref: '#/components/schemas/UUID'
+    FYRequired:
+      name: fy
+      in: query
+      required: true
+      description: Financial year label, e.g. `2025-26`. Must have a rules file (`GET /rules`); otherwise `422`.
+      schema:
+        $ref: '#/components/schemas/FinancialYear'
+    FYOptional:
+      name: fy
+      in: query
+      required: false
+      description: Financial year label, e.g. `2025-26`. Restricts results to 1 April - 31 March of that year.
+      schema:
+        $ref: '#/components/schemas/FinancialYear'
+    AccountFilter:
+      name: account
+      in: query
+      required: false
+      description: Only rows belonging to this demat account ID.
+      schema:
+        $ref: '#/components/schemas/UUID'
+    IsinFilter:
+      name: isin
+      in: query
+      required: false
+      description: Only rows for this ISIN (upper-cased before matching).
+      schema:
+        $ref: '#/components/schemas/ISIN'
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: |
+        Opaque pagination cursor returned as `next_cursor` by the previous page. Omit for the
+        first page. Malformed cursors yield `400`.
+      schema:
+        type: string
+        example: eyJkIjoiMjAyNS0wOS0xMiIsImsiOiI3ZjNhIn0
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Values of 0 or less (or missing) mean 100; values above 1000 are clamped to 1000.
+      schema:
+        type: integer
+        default: 100
+        maximum: 1000
+        example: 100
+
+  headers:
+    SetRefreshCookie:
+      description: |
+        Sets the `taxpl_refresh` cookie with the (new) refresh token. Attributes: `Path=/api/v1/auth`,
+        `HttpOnly`, `SameSite=Lax`, `Secure` (except in development) and `Expires` = now + refresh TTL.
+      schema:
+        type: string
+        example: taxpl_refresh=Q0lsc3V4...; Path=/api/v1/auth; Expires=Wed, 25 Nov 2026 09:30:00 GMT; HttpOnly; Secure; SameSite=Lax
+
+  requestBodies:
+    Credentials:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Credentials'
+
+  responses:
+    BadRequest:
+      description: |
+        Malformed request: invalid JSON, unknown JSON field (bodies are decoded strictly),
+        invalid pagination cursor, over-long `Idempotency-Key`, or an answer that the review item
+        kind does not accept.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Bad request
+            status: 400
+            detail: 'invalid JSON body: json: unknown field "foo"'
+            instance: /api/v1/accounts
+    Unauthorized:
+      description: Missing, malformed, invalid or expired bearer token; or bad login credentials / refresh token on the auth endpoints.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Unauthorized
+            status: 401
+            detail: invalid or expired token
+            instance: /api/v1/me
+    NotFound:
+      description: The resource does not exist or does not belong to the authenticated user.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Not found
+            status: 404
+            detail: resource not found
+            instance: /api/v1/jobs/7c1f3f0e-2a7b-4f8e-9a2b-0d4c1b6e5f10
+    Conflict:
+      description: The request conflicts with current state (duplicate email, duplicate broker+nickname, review item no longer open).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Conflict
+            status: 409
+            detail: an account with this email already exists
+            instance: /api/v1/auth/register
+    PayloadTooLarge:
+      description: The uploaded file exceeds the configured maximum (default 20 MB) or the multipart body could not be parsed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Payload too large
+            status: 413
+            detail: file must be at most 20 MB
+            instance: /api/v1/uploads
+    ValidationFailed:
+      description: One or more fields are invalid; `errors` maps each field name to a message.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Validation failed
+            status: 422
+            detail: One or more fields are invalid.
+            instance: /api/v1/auth/register
+            errors:
+              email: invalid email address
+              password: password must be at least 10 characters and contain a letter and a digit
+    TooManyRequests:
+      description: Rate limit exceeded for this IP or user. Retry after the window resets.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying (always 60).
+          schema:
+            type: integer
+            const: 60
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Too many requests
+            status: 429
+            detail: Slow down and try again in a minute.
+            instance: /api/v1/auth/login
+    InternalError:
+      description: Unexpected server error. `detail` includes the request ID for support.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Internal error
+            status: 500
+            detail: Something went wrong on our side. The request ID is 0a1b2c3d/abc-000001.
+            instance: /api/v1/summary
+
+  examples:
+    UploadCreated:
+      summary: New upload (201)
+      value:
+        id: 4b0e1c92-7d3a-4f6e-8a1b-2c3d4e5f6a7b
+        account_id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+        broker: zerodha
+        filename: tradebook-2025.csv
+        sha256: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+        size_bytes: 184320
+        status: UPLOADED
+        created_at: '2026-10-26T09:30:00Z'
+        duplicate: false
+        job_id: 7c1f3f0e-2a7b-4f8e-9a2b-0d4c1b6e5f10
+        detect_confidence: 0.98
+    UploadDuplicate:
+      summary: Same content already uploaded (200)
+      value:
+        id: 4b0e1c92-7d3a-4f6e-8a1b-2c3d4e5f6a7b
+        account_id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+        broker: zerodha
+        filename: tradebook-2025.csv
+        sha256: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+        size_bytes: 184320
+        status: NORMALIZED
+        created_at: '2026-10-26T09:30:00Z'
+        duplicate: true
+        job_id: 7c1f3f0e-2a7b-4f8e-9a2b-0d4c1b6e5f10
+
+  schemas:
+    # ------------------------------------------------------------ primitives
+    Decimal:
+      type: string
+      description: |
+        Arbitrary-precision decimal encoded as a JSON string (shopspring/decimal), e.g.
+        `"1234.5000"` or `"-12.5"`. Never a JSON number. Clients must parse it with a decimal
+        library, not `parseFloat`.
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      examples:
+        - '1234.5000'
+        - '-12.5'
+        - '0'
+    Date:
+      type: string
+      description: Calendar date as `YYYY-MM-DD`.
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      format: date
+      examples:
+        - '2025-09-12'
+    FinancialYear:
+      type: string
+      description: Indian financial year label `YYYY-YY` (1 April to 31 March), e.g. `2025-26`.
+      pattern: '^[0-9]{4}-[0-9]{2}$'
+      examples:
+        - '2025-26'
+    UUID:
+      type: string
+      format: uuid
+      description: UUID v4 identifier.
+      examples:
+        - 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+    ISIN:
+      type: string
+      description: 12-character ISIN.
+      minLength: 12
+      maxLength: 12
+      pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$'
+      examples:
+        - INE009A01021
+
+    # ------------------------------------------------------------ enums
+    Category:
+      type: string
+      description: Tax bucket of a gain line.
+      enum: [STCG_EQUITY, LTCG_EQUITY, INTRADAY, FNO, BUYBACK, OUT_OF_SCOPE]
+    JobState:
+      type: string
+      description: |
+        Pipeline state of a job. `REPORT_READY`, `NEEDS_REVIEW` and `FAILED` are terminal.
+      enum: [UPLOADED, PARSING, NORMALIZED, ADJUSTED, MATCHED, COMPUTED, REPORT_READY, NEEDS_REVIEW, FAILED]
+    JobKind:
+      type: string
+      description: What the job does.
+      enum: [PROCESS_UPLOAD, RECOMPUTE, REPORT]
+    ReviewKind:
+      type: string
+      description: Why the engine needs the user's input.
+      enum: [MISSING_BUY_HISTORY, UNKNOWN_ISIN, MISSING_FMV_2018, TRANSFER_DETAILS, PARSE_ISSUE, OPEN_FNO_POSITION, BUYBACK_DEEMED_DIVIDEND]
+    ReviewStatus:
+      type: string
+      enum: [open, resolved, dismissed]
+    TradeKind:
+      type: string
+      description: Ordinary exchange trade or a special movement.
+      enum: [REGULAR, BUYBACK, TRANSFER_IN, TRANSFER_OUT, OPENING]
+    Side:
+      type: string
+      enum: [BUY, SELL]
+    Segment:
+      type: string
+      description: Instrument class. Only EQ, MF (equity-oriented), FUT and OPT are in scope.
+      enum: [EQ, MF, FUT, OPT, OTHER]
+    LotOrigin:
+      type: string
+      description: How a lot came into existence.
+      enum: [TRADE, BONUS, DEMERGER, MERGER, TRANSFER, OPENING]
+    ReportFormat:
+      type: string
+      enum: [xlsx, pdf, json]
+    BuybackRegime:
+      type: string
+      description: Buyback tax regime that applied on the sale date.
+      enum: [exempt_115qa, deemed_dividend, capital_gains]
+    AdjustmentKind:
+      type: string
+      description: Corporate action kind.
+      enum: [SPLIT, BONUS, DEMERGER, MERGER]
+
+    # ------------------------------------------------------------ errors
+    Problem:
+      type: object
+      description: RFC 9457 problem details. Always served as `application/problem+json`.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          description: Problem type URI. Always `about:blank` in this API.
+          examples: ['about:blank']
+        title:
+          type: string
+          description: Short, human-readable summary tied to the status code.
+          examples: [Validation failed]
+        status:
+          type: integer
+          description: HTTP status code.
+          examples: [422]
+        detail:
+          type: string
+          description: Human-readable explanation. Omitted when empty.
+        instance:
+          type: string
+          description: Request path that produced the problem.
+          examples: [/api/v1/auth/register]
+        errors:
+          type: object
+          description: Field-level validation messages (`field -> message`). Present on `422` only.
+          additionalProperties:
+            type: string
+          examples:
+            - email: invalid email address
+
+    # ------------------------------------------------------------ auth / me
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          examples: [priya@example.com]
+        password:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 200
+          description: 10-200 characters with at least one letter and one digit (enforced on register and password change).
+          examples: [correct-horse-42]
+    User:
+      type: object
+      required: [id, email, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        email:
+          type: string
+          format: email
+          examples: [priya@example.com]
+        created_at:
+          type: string
+          format: date-time
+          examples: ['2026-10-01T12:00:00Z']
+    TokenResponse:
+      type: object
+      required: [access_token, expires_at, user]
+      properties:
+        access_token:
+          type: string
+          description: 'JWT access token for the `Authorization: Bearer` header.'
+          examples: [eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5YThiN2M2ZCJ9.sig]
+        expires_at:
+          type: string
+          format: date-time
+          description: When the access token expires (default 15 minutes after issue).
+          examples: ['2026-10-26T09:45:00Z']
+        user:
+          $ref: '#/components/schemas/User'
+    MeResponse:
+      type: object
+      required: [user, accounts, trades, open_review_items, pan_on_file]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        accounts:
+          type: integer
+          description: Number of demat accounts.
+          examples: [2]
+        trades:
+          type: integer
+          format: int64
+          description: Number of stored trades.
+          examples: [1843]
+        open_review_items:
+          type: integer
+          format: int64
+          examples: [3]
+        pan_on_file:
+          type: boolean
+          description: Whether a (hashed) PAN has been stored for the user.
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 200
+    DeleteMeRequest:
+      type: object
+      required: [password, confirm]
+      properties:
+        password:
+          type: string
+          format: password
+          description: The user's current password.
+        confirm:
+          type: string
+          description: Must be the literal string `DELETE` (case-insensitive, trimmed).
+          const: DELETE
+
+    # ------------------------------------------------------------ accounts
+    Account:
+      type: object
+      required: [id, broker, nickname, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        broker:
+          type: string
+          description: Lower-case broker name (`zerodha`, `groww`, `upstox`, `angelone`, `other`, ...).
+          examples: [zerodha]
+        nickname:
+          type: string
+          maxLength: 60
+          examples: [Main Zerodha]
+        created_at:
+          type: string
+          format: date-time
+    AccountList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+    CreateAccountRequest:
+      type: object
+      required: [broker, nickname]
+      properties:
+        broker:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: Lower-cased and trimmed by the server.
+          examples: [zerodha]
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 60
+          examples: [Main Zerodha]
+
+    # ------------------------------------------------------------ uploads
+    UploadRequest:
+      type: object
+      required: [file, account_id]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: The tradebook (CSV, or XLSX with a `.xlsx` extension). Must be non-empty and at most `MAX_UPLOAD_MB`.
+        account_id:
+          $ref: '#/components/schemas/UUID'
+        broker:
+          type: string
+          description: One of `GET /brokers`. Optional for CSV (auto-detected); required for XLSX.
+          examples: [zerodha]
+    Upload:
+      type: object
+      required: [id, account_id, broker, filename, sha256, size_bytes, status, created_at, duplicate]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        account_id:
+          $ref: '#/components/schemas/UUID'
+        broker:
+          type: string
+          examples: [zerodha]
+        filename:
+          type: string
+          description: Base name of the uploaded file.
+          examples: [tradebook-2025.csv]
+        sha256:
+          type: string
+          description: Hex SHA-256 of the file content; uploads are de-duplicated on it per user.
+          pattern: '^[0-9a-f]{64}$'
+        size_bytes:
+          type: integer
+          format: int64
+        status:
+          type: string
+          description: |
+            On `POST /uploads` this is the upload row's own status (`UPLOADED`, later `NORMALIZED`).
+            On `GET /uploads` it is replaced by the latest job's `JobState` when a job exists.
+          examples: [UPLOADED]
+        created_at:
+          type: string
+          format: date-time
+        duplicate:
+          type: boolean
+          description: True when this content had already been uploaded; no new job was created.
+        job_id:
+          $ref: '#/components/schemas/UUID'
+          description: The processing job for this upload. Omitted when none exists.
+        detect_confidence:
+          type: number
+          format: double
+          description: |
+            Broker auto-detection confidence (0-1); `1` when `broker` was given explicitly.
+            Omitted on duplicates and when zero.
+          examples: [0.98]
+    UploadList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Upload'
+
+    # ------------------------------------------------------------ jobs
+    Job:
+      type: object
+      required: [id, upload_id, kind, state, rules_version, attempt, started_at, finished_at, created_at, updated_at, terminal]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        upload_id:
+          type: [string, 'null']
+          format: uuid
+          description: The upload this job processes; `null` for RECOMPUTE and REPORT jobs.
+        kind:
+          $ref: '#/components/schemas/JobKind'
+        state:
+          $ref: '#/components/schemas/JobState'
+        rules_version:
+          type: string
+          description: Rules version used, e.g. `fy2025-26@1`; empty until computed.
+          examples: [fy2025-26@1]
+        attempt:
+          type: integer
+          format: int32
+          description: Number of processing attempts so far (max 3 before FAILED).
+        error:
+          $ref: '#/components/schemas/JobError'
+          description: Present only when the job failed.
+        started_at:
+          type: [string, 'null']
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        terminal:
+          type: boolean
+          description: True when `state` is `REPORT_READY`, `NEEDS_REVIEW` or `FAILED`.
+    JobError:
+      type: object
+      description: Failure details recorded on the job.
+      required: [message]
+      properties:
+        message:
+          type: string
+          examples: ['parse: unknown column layout']
+    JobEvent:
+      type: object
+      description: One progress event of a job. Also the `data` payload of SSE `state` events.
+      required: [id, state, message, at]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Monotonic event ID; use it as `Last-Event-ID` to resume the stream.
+          examples: [17]
+        state:
+          $ref: '#/components/schemas/JobState'
+        message:
+          type: string
+          examples: [Parsing zerodha tradebook]
+        detail:
+          type: object
+          description: Optional structured detail (counts, warnings). Omitted when absent.
+          additionalProperties: true
+        at:
+          type: string
+          format: date-time
+    JobList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+    JobDetail:
+      type: object
+      required: [job, events]
+      properties:
+        job:
+          $ref: '#/components/schemas/Job'
+        events:
+          type: array
+          description: All events of the job in insertion order.
+          items:
+            $ref: '#/components/schemas/JobEvent'
+
+    # ------------------------------------------------------------ review items
+    ReviewItem:
+      type: object
+      required: [id, kind, account_id, isin, symbol, message, status, created_at, resolved_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        kind:
+          $ref: '#/components/schemas/ReviewKind'
+        account_id:
+          type: [string, 'null']
+          format: uuid
+          description: Account the item relates to, or `null` when not account-specific.
+        account_name:
+          type: string
+          description: Account nickname. Omitted when the item has no account.
+        isin:
+          type: string
+          description: ISIN concerned; may be empty (e.g. `UNKNOWN_ISIN`, `PARSE_ISSUE`).
+        symbol:
+          type: string
+        message:
+          type: string
+          description: Human-readable description of what is needed.
+        payload:
+          type: object
+          description: |
+            Kind-specific context. Usually `string -> string` (e.g. `quantity`, `sale_date`);
+            `PARSE_ISSUE` items carry `{file, line, reason}` where `line` is a number. Omitted when empty.
+          additionalProperties: true
+          examples:
+            - quantity: '10'
+              sale_date: '2025-09-12'
+        status:
+          $ref: '#/components/schemas/ReviewStatus'
+        resolution:
+          type: object
+          description: What was recorded when the item was resolved/dismissed. Omitted while open.
+          additionalProperties: true
+          examples:
+            - opening_lot_id: 2f6e9b5a-0c3d-4e7f-8a9b-1c2d3e4f5a6b
+              acquisition_date: '2019-03-01'
+              cost_total: '12345'
+              quantity: '10'
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: [string, 'null']
+          format: date-time
+    ReviewItemList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewItem'
+    ResolveReviewItemRequest:
+      type: object
+      description: |
+        Answer for a review item. Which fields apply depends on the item's `kind` (see the
+        operation description). Unknown fields are rejected.
+      properties:
+        dismiss:
+          type: boolean
+          description: Dismiss the item without changing any data (any kind).
+        acquisition_date:
+          $ref: '#/components/schemas/Date'
+          description: '`MISSING_BUY_HISTORY`, `TRANSFER_DETAILS`: original acquisition date.'
+        cost_total:
+          $ref: '#/components/schemas/Decimal'
+          description: '`MISSING_BUY_HISTORY`, `TRANSFER_DETAILS`: total (not per-unit) cost, non-negative.'
+        quantity:
+          $ref: '#/components/schemas/Decimal'
+          description: '`MISSING_BUY_HISTORY`: positive quantity of the opening lot; defaults to `payload.quantity`.'
+        fmv:
+          $ref: '#/components/schemas/Decimal'
+          description: '`MISSING_FMV_2018`: positive fair market value per unit on 31 Jan 2018.'
+        isin:
+          $ref: '#/components/schemas/ISIN'
+          description: '`UNKNOWN_ISIN`: the 12-character ISIN for the symbol.'
+    ResolveReviewItemResponse:
+      type: object
+      required: [status, resolution, job_id]
+      properties:
+        status:
+          $ref: '#/components/schemas/ReviewStatus'
+          description: '`resolved` or `dismissed`.'
+        resolution:
+          type: object
+          description: What was recorded (same object stored on the item).
+          additionalProperties: true
+        job_id:
+          $ref: '#/components/schemas/UUID'
+          description: The RECOMPUTE (or re-parse PROCESS_UPLOAD) job that was queued.
+
+    # ------------------------------------------------------------ summary
+    PeriodTotal:
+      type: object
+      description: LTCG/STCG totals within one equity rate period (FY 2024-25 has two).
+      required: [period, stcg_rate, ltcg_rate, stcg, ltcg, ltcg_exemption_allocated, ltcg_taxable, estimated_tax_stcg, estimated_tax_ltcg]
+      properties:
+        period:
+          type: string
+          description: Period label `from..to`.
+          examples: ['2024-07-23..2025-03-31']
+        stcg_rate:
+          $ref: '#/components/schemas/Decimal'
+          description: Fraction, e.g. `"0.20"`.
+        ltcg_rate:
+          $ref: '#/components/schemas/Decimal'
+        stcg:
+          $ref: '#/components/schemas/Decimal'
+        ltcg:
+          $ref: '#/components/schemas/Decimal'
+        ltcg_exemption_allocated:
+          $ref: '#/components/schemas/Decimal'
+          description: Estimate; share of the annual LTCG exemption allocated to this period.
+        ltcg_taxable:
+          $ref: '#/components/schemas/Decimal'
+          description: Estimate.
+        estimated_tax_stcg:
+          $ref: '#/components/schemas/Decimal'
+          description: Estimate.
+        estimated_tax_ltcg:
+          $ref: '#/components/schemas/Decimal'
+          description: Estimate.
+    CategoryTotal:
+      type: object
+      required: [category, count, sale_value, cost, charges, gain]
+      properties:
+        category:
+          $ref: '#/components/schemas/Category'
+        count:
+          type: integer
+          description: Number of gain lines.
+        sale_value:
+          $ref: '#/components/schemas/Decimal'
+        cost:
+          $ref: '#/components/schemas/Decimal'
+        charges:
+          $ref: '#/components/schemas/Decimal'
+        gain:
+          $ref: '#/components/schemas/Decimal'
+    AccountTotal:
+      type: object
+      required: [account_id, by_category]
+      properties:
+        account_id:
+          type: string
+          description: Account **nickname** when known (the handler substitutes it), otherwise the account UUID.
+          examples: [Main Zerodha]
+        by_category:
+          type: object
+          description: Net gain per category.
+          additionalProperties:
+            $ref: '#/components/schemas/Decimal'
+          examples:
+            - STCG_EQUITY: '15230.5'
+              LTCG_EQUITY: '-2200'
+    LossLine:
+      type: object
+      description: A net loss in one bucket with its set-off and carry-forward rules.
+      required: [loss, amount, set_off_against, carry_forward_years, carry_forward_against]
+      properties:
+        loss:
+          type: string
+          description: Loss bucket.
+          enum: [STCL, LTCL, SPECULATIVE, NON_SPECULATIVE_BUSINESS]
+        amount:
+          $ref: '#/components/schemas/Decimal'
+          description: Absolute loss amount (positive).
+        set_off_against:
+          type: array
+          items:
+            type: string
+          examples:
+            - [STCG, LTCG]
+        carry_forward_years:
+          type: integer
+          examples: [8]
+        carry_forward_against:
+          type: array
+          items:
+            type: string
+    Summary:
+      type: object
+      description: One financial year's totals. Every `estimated_*` field is an estimate only.
+      required:
+        - fy
+        - year_label
+        - law
+        - rules_version
+        - verified_by
+        - categories
+        - accounts
+        - periods
+        - stcg
+        - ltcg
+        - intraday
+        - fno
+        - buyback_dividend
+        - buyback_exempt
+        - fno_turnover
+        - intraday_turnover
+        - audit_threshold
+        - audit_threshold_low_cash
+        - audit_note
+        - ltcg_exemption
+        - ltcg_taxable_after_exemption
+        - estimated_tax
+        - estimate_notes
+        - losses
+        - references
+      properties:
+        fy:
+          $ref: '#/components/schemas/FinancialYear'
+        year_label:
+          type: string
+          examples: [Financial Year 2025-26 (AY 2026-27)]
+        law:
+          type: string
+          examples: ['Income-tax Act, 1961']
+        rules_version:
+          type: string
+          examples: [fy2025-26@1]
+        verified_by:
+          type: string
+          description: Who reviewed the rules file.
+        categories:
+          type: [array, 'null']
+          description: Per-category roll-up, sorted by category. `null` when there are no gains.
+          items:
+            $ref: '#/components/schemas/CategoryTotal'
+        accounts:
+          type: [array, 'null']
+          description: Per-account roll-up. `null` when there are no gains.
+          items:
+            $ref: '#/components/schemas/AccountTotal'
+        periods:
+          type: array
+          description: One entry per equity rate period in the year.
+          items:
+            $ref: '#/components/schemas/PeriodTotal'
+        stcg:
+          $ref: '#/components/schemas/Decimal'
+        ltcg:
+          $ref: '#/components/schemas/Decimal'
+        intraday:
+          $ref: '#/components/schemas/Decimal'
+          description: Speculative business income.
+        fno:
+          $ref: '#/components/schemas/Decimal'
+          description: Non-speculative business income.
+        buyback_dividend:
+          $ref: '#/components/schemas/Decimal'
+          description: Deemed-dividend income (other sources) from buybacks between 1 Oct 2024 and 31 Mar 2026.
+        buyback_exempt:
+          $ref: '#/components/schemas/Decimal'
+          description: Exempt buyback proceeds under the s.115QA regime.
+        fno_turnover:
+          $ref: '#/components/schemas/Decimal'
+          description: Sum of absolute P&L per closed position (ICAI Guidance Note).
+        intraday_turnover:
+          $ref: '#/components/schemas/Decimal'
+        audit_threshold:
+          $ref: '#/components/schemas/Decimal'
+        audit_threshold_low_cash:
+          $ref: '#/components/schemas/Decimal'
+        audit_note:
+          type: string
+        ltcg_exemption:
+          $ref: '#/components/schemas/Decimal'
+          examples: ['125000']
+        ltcg_taxable_after_exemption:
+          $ref: '#/components/schemas/Decimal'
+        estimated_tax:
+          $ref: '#/components/schemas/Decimal'
+          description: Estimate only; ignores other income, surcharge, cess, set-off and rebate.
+        estimate_notes:
+          type: array
+          items:
+            type: string
+        losses:
+          type: [array, 'null']
+          description: Net losses per bucket. `null` when there are none.
+          items:
+            $ref: '#/components/schemas/LossLine'
+        references:
+          type: object
+          description: Statutory section references from the rules file (key -> section).
+          additionalProperties:
+            type: string
+          examples:
+            - stcg: s.111A
+              ltcg: s.112A
+    Computation:
+      type: object
+      description: Metadata of the latest completed computation.
+      required: [id, checksum, rules_versions, trade_count, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        checksum:
+          type: string
+          description: Deterministic checksum of the computation inputs/outputs.
+        rules_versions:
+          type: object
+          description: Rules version used per financial year (`fy -> version`).
+          additionalProperties:
+            type: string
+          examples:
+            - '2024-25': fy2024-25@1
+              '2025-26': fy2025-26@1
+        trade_count:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+    SummaryResponse:
+      type: object
+      required: [summary, open_review_items, years_with_data, computation, disclaimer]
+      properties:
+        summary:
+          $ref: '#/components/schemas/Summary'
+        open_review_items:
+          type: integer
+          format: int64
+        years_with_data:
+          type: array
+          description: Financial years that have gain lines.
+          items:
+            $ref: '#/components/schemas/FinancialYear'
+        computation:
+          oneOf:
+            - $ref: '#/components/schemas/Computation'
+            - type: 'null'
+          description: '`null` until the first computation has run.'
+        disclaimer:
+          type: string
+          const: This is not tax advice. Verify with a qualified CA.
+
+    # ------------------------------------------------------------ gains
+    Gain:
+      type: object
+      required: [id, fy, category, account_id, account_name, isin, symbol, sale_date, quantity, sale_value, cost_of_acquisition, charges_deductible, gain, holding_days, rules_version]
+      properties:
+        id:
+          type: string
+          description: Gain line ID (use with `GET /gains/{id}/explain`).
+        fy:
+          $ref: '#/components/schemas/FinancialYear'
+        category:
+          $ref: '#/components/schemas/Category'
+        account_id:
+          $ref: '#/components/schemas/UUID'
+        account_name:
+          type: string
+          examples: [Main Zerodha]
+        isin:
+          type: string
+          description: Empty for F&O lines.
+        symbol:
+          type: string
+          examples: [INFY]
+        contract_key:
+          type: string
+          description: F&O only; `SYMBOL|expiry[|strike|CE/PE]`. Omitted otherwise.
+          examples: ['NIFTY|2025-09-25|24500|CE']
+        sale_date:
+          $ref: '#/components/schemas/Date'
+        acquisition_date:
+          $ref: '#/components/schemas/Date'
+          description: Omitted for intraday / F&O lines.
+        quantity:
+          $ref: '#/components/schemas/Decimal'
+        sale_value:
+          $ref: '#/components/schemas/Decimal'
+        cost_of_acquisition:
+          $ref: '#/components/schemas/Decimal'
+          description: Cost after grandfathering (equals actual cost when it does not apply).
+        charges_deductible:
+          $ref: '#/components/schemas/Decimal'
+        gain:
+          $ref: '#/components/schemas/Decimal'
+          description: '`sale_value - cost_of_acquisition - charges_deductible`.'
+        holding_days:
+          type: integer
+          format: int32
+          description: 0 for intraday / F&O.
+        rate_period:
+          type: string
+          description: Equity rate period label the sale falls in. Omitted when not applicable.
+          examples: ['2025-04-01..2026-03-31']
+        buyback_regime:
+          $ref: '#/components/schemas/BuybackRegime'
+          description: BUYBACK lines only; omitted otherwise.
+        grandfathered:
+          type: boolean
+          description: Whether the 31 Jan 2018 FMV replaced the actual cost. Present only when a grandfathering comparison was made.
+        rules_version:
+          type: string
+          examples: [fy2025-26@1]
+    GainPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Gain'
+        next_cursor:
+          type: string
+          description: Cursor for the next page; empty string on the last page.
+          examples: [eyJkIjoiMjAyNS0wOS0xMiIsImsiOiI3ZjNhIn0, '']
+
+    # ------------------------------------------------------------ explain
+    Charges:
+      type: object
+      description: Transaction costs of one trade.
+      required: [brokerage, stt, exchange_fee, sebi_fee, gst, stamp_duty, source]
+      properties:
+        brokerage:
+          $ref: '#/components/schemas/Decimal'
+        stt:
+          $ref: '#/components/schemas/Decimal'
+        exchange_fee:
+          $ref: '#/components/schemas/Decimal'
+        sebi_fee:
+          $ref: '#/components/schemas/Decimal'
+        gst:
+          $ref: '#/components/schemas/Decimal'
+        stamp_duty:
+          $ref: '#/components/schemas/Decimal'
+        source:
+          type: string
+          description: Whether the charges came from the broker file or were estimated.
+          enum: [imported, estimated]
+    Grandfathering:
+      type: object
+      description: The s.55(2)(ac) 1961 Act / s.90(7) 2025 Act comparison for lots acquired before 1 Feb 2018.
+      required: [fmv_31_jan_2018_per_unit, fmv_total, sale_value, actual_cost, chosen_cost, applied, explanation]
+      properties:
+        fmv_31_jan_2018_per_unit:
+          $ref: '#/components/schemas/Decimal'
+        fmv_total:
+          $ref: '#/components/schemas/Decimal'
+        sale_value:
+          $ref: '#/components/schemas/Decimal'
+        actual_cost:
+          $ref: '#/components/schemas/Decimal'
+        chosen_cost:
+          $ref: '#/components/schemas/Decimal'
+        applied:
+          type: boolean
+          description: True when the chosen cost is not the actual cost.
+        explanation:
+          type: string
+    Adjustment:
+      type: object
+      description: A corporate action applied to a lot.
+      required: [kind, ex_date, qty_from, qty_to, cost_from, cost_to]
+      properties:
+        kind:
+          $ref: '#/components/schemas/AdjustmentKind'
+        ex_date:
+          $ref: '#/components/schemas/Date'
+        ratio:
+          type: string
+          description: '`old:new`, as announced. Omitted when empty.'
+          examples: ['1:5']
+        note:
+          type: string
+          description: Omitted when empty.
+        qty_from:
+          $ref: '#/components/schemas/Decimal'
+        qty_to:
+          $ref: '#/components/schemas/Decimal'
+        cost_from:
+          $ref: '#/components/schemas/Decimal'
+        cost_to:
+          $ref: '#/components/schemas/Decimal'
+    TradeView:
+      type: object
+      description: A trade as shown in the explain drawer.
+      required: [id, date, side, kind, quantity, price, value]
+      properties:
+        id:
+          type: string
+        date:
+          $ref: '#/components/schemas/Date'
+        time:
+          type: string
+          description: '`HH:MM:SS` when known. Omitted otherwise.'
+          examples: ['10:15:32']
+        side:
+          $ref: '#/components/schemas/Side'
+        kind:
+          $ref: '#/components/schemas/TradeKind'
+        quantity:
+          $ref: '#/components/schemas/Decimal'
+        price:
+          $ref: '#/components/schemas/Decimal'
+        value:
+          $ref: '#/components/schemas/Decimal'
+          description: '`quantity * price` rounded to money scale.'
+        exchange:
+          type: string
+          description: Omitted when unknown.
+          examples: [NSE]
+        source:
+          type: string
+          description: Source file name. Omitted when unknown.
+        source_row:
+          type: integer
+          description: 1-based row in the source file. Omitted when 0.
+        charges:
+          $ref: '#/components/schemas/Charges'
+          description: Omitted when the broker export had no charges.
+    LotView:
+      type: object
+      description: One matched lot.
+      required: [lot_id, account, origin, acquired, quantity, actual_cost, cost_per_unit, holding_days, adjustments]
+      properties:
+        lot_id:
+          type: string
+        account:
+          type: string
+          description: Account nickname (or ID when unknown).
+        origin:
+          $ref: '#/components/schemas/LotOrigin'
+        acquired:
+          $ref: '#/components/schemas/Date'
+        quantity:
+          $ref: '#/components/schemas/Decimal'
+          description: Quantity matched from this lot.
+        actual_cost:
+          $ref: '#/components/schemas/Decimal'
+          description: Actual cost of the matched units.
+        cost_per_unit:
+          $ref: '#/components/schemas/Decimal'
+          description: '`actual_cost / quantity` rounded to 4 places (`"0"` when quantity is 0).'
+        holding_days:
+          type: integer
+        grandfathering:
+          $ref: '#/components/schemas/Grandfathering'
+          description: Omitted when no grandfathering comparison applied.
+        adjustments:
+          type: array
+          description: Corporate actions applied to the lot (always an array, possibly empty).
+          items:
+            $ref: '#/components/schemas/Adjustment'
+        open_trade:
+          $ref: '#/components/schemas/TradeView'
+          description: The buy trade that opened the lot. Omitted for lots without a trade (bonus, opening lots).
+    ExplainTree:
+      type: object
+      description: The full "why this number" explanation of one gain line.
+      required: [gain_id, category, fy, account, symbol, gain, sale_value, cost_of_acquisition, charges_deductible, lots, rules_version, steps, disclaimer]
+      properties:
+        gain_id:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+        fy:
+          $ref: '#/components/schemas/FinancialYear'
+        account:
+          type: string
+          description: Account nickname (or ID when unknown).
+        symbol:
+          type: string
+        isin:
+          type: string
+          description: Omitted for F&O.
+        contract_key:
+          type: string
+          description: F&O only; omitted otherwise.
+        gain:
+          $ref: '#/components/schemas/Decimal'
+        sale_value:
+          $ref: '#/components/schemas/Decimal'
+        cost_of_acquisition:
+          $ref: '#/components/schemas/Decimal'
+        charges_deductible:
+          $ref: '#/components/schemas/Decimal'
+        sale:
+          $ref: '#/components/schemas/TradeView'
+          description: The sell / closing trade. Omitted when not found.
+        buy:
+          $ref: '#/components/schemas/TradeView'
+          description: The opening trade for intraday and F&O lines. Omitted for equity lot matches.
+        lots:
+          type: array
+          description: Matched lots (equity lines). Empty for intraday / F&O.
+          items:
+            $ref: '#/components/schemas/LotView'
+        rules_version:
+          type: string
+        rate_period:
+          type: string
+          description: Omitted when not applicable.
+        buyback_regime:
+          $ref: '#/components/schemas/BuybackRegime'
+          description: BUYBACK lines only; omitted otherwise.
+        steps:
+          type: [array, 'null']
+          description: Human-readable derivation steps. May be `null` when the gain recorded none.
+          items:
+            type: string
+        disclaimer:
+          type: string
+          examples: ['This report organises your trade data; it is not tax advice. Verify every figure with a qualified Chartered Accountant before filing.']
+
+    # ------------------------------------------------------------ trades / holdings
+    Trade:
+      type: object
+      description: A normalised tradebook row.
+      required: [id, account_id, account_name, broker, isin, symbol, segment, kind, side, quantity, price, trade_date, trade_time, exchange]
+      properties:
+        id:
+          type: string
+          description: Deterministic hash of the source row (32 hex chars).
+          examples: [7f3a9c2e1b4d5f60a8c9e2d1b3f4a5c6]
+        account_id:
+          $ref: '#/components/schemas/UUID'
+        account_name:
+          type: string
+        broker:
+          type: string
+          description: Broker of the account.
+        isin:
+          type: string
+          description: Empty for F&O.
+        symbol:
+          type: string
+        segment:
+          $ref: '#/components/schemas/Segment'
+        kind:
+          $ref: '#/components/schemas/TradeKind'
+        side:
+          $ref: '#/components/schemas/Side'
+        quantity:
+          $ref: '#/components/schemas/Decimal'
+        price:
+          $ref: '#/components/schemas/Decimal'
+        trade_date:
+          $ref: '#/components/schemas/Date'
+        trade_time:
+          type: string
+          description: '`HH:MM:SS`, or empty when unknown.'
+        exchange:
+          type: string
+          description: May be empty.
+          examples: [NSE]
+        expiry:
+          $ref: '#/components/schemas/Date'
+          description: Derivatives only; omitted otherwise.
+        strike:
+          $ref: '#/components/schemas/Decimal'
+          description: Options only; omitted otherwise.
+        option_type:
+          type: string
+          description: Options only (`CE` or `PE`); omitted otherwise.
+          enum: [CE, PE]
+    TradePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Trade'
+        next_cursor:
+          type: string
+          description: Cursor for the next page; empty string on the last page.
+    Holding:
+      type: object
+      description: An open lot.
+      required: [id, account_id, account_name, isin, symbol, origin, quantity_open, cost_open, acquisition_date]
+      properties:
+        id:
+          type: string
+        account_id:
+          $ref: '#/components/schemas/UUID'
+        account_name:
+          type: string
+        isin:
+          type: string
+        symbol:
+          type: string
+        origin:
+          $ref: '#/components/schemas/LotOrigin'
+        quantity_open:
+          $ref: '#/components/schemas/Decimal'
+        cost_open:
+          $ref: '#/components/schemas/Decimal'
+          description: Cost still attached to the open quantity.
+        acquisition_date:
+          $ref: '#/components/schemas/Date'
+        grandfathered_fmv:
+          $ref: '#/components/schemas/Decimal'
+          description: 31 Jan 2018 FMV per unit (split-adjusted). Omitted when not applicable.
+    HoldingList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Holding'
+    ManualTradeRequest:
+      type: object
+      required: [account_id, isin, kind, quantity, trade_date]
+      properties:
+        account_id:
+          $ref: '#/components/schemas/UUID'
+        isin:
+          $ref: '#/components/schemas/ISIN'
+        symbol:
+          type: string
+          description: Upper-cased; defaults to the ISIN.
+          examples: [INFY]
+        kind:
+          type: string
+          description: '`OPENING` is not accepted here.'
+          enum: [BUYBACK, TRANSFER_IN, TRANSFER_OUT, REGULAR]
+        side:
+          $ref: '#/components/schemas/Side'
+          description: Required for `REGULAR`; ignored (derived) for the other kinds.
+        quantity:
+          $ref: '#/components/schemas/Decimal'
+          description: Positive.
+        price:
+          $ref: '#/components/schemas/Decimal'
+          description: Per-unit price, non-negative. Defaults to `"0"`.
+        trade_date:
+          $ref: '#/components/schemas/Date'
+        original_acquisition_date:
+          $ref: '#/components/schemas/Date'
+          description: '`TRANSFER_IN` only: when the shares were originally bought.'
+        original_cost:
+          $ref: '#/components/schemas/Decimal'
+          description: '`TRANSFER_IN` only: total original cost for `quantity`. Required when `original_acquisition_date` is given.'
+    ManualTradeResponse:
+      type: object
+      required: [trade_id, job_id]
+      properties:
+        trade_id:
+          type: string
+          description: Deterministic trade ID (32 hex chars).
+        job_id:
+          $ref: '#/components/schemas/UUID'
+          description: The RECOMPUTE job that was queued.
+
+    # ------------------------------------------------------------ reports
+    CreateReportRequest:
+      type: object
+      required: [fy, format]
+      properties:
+        fy:
+          $ref: '#/components/schemas/FinancialYear'
+        format:
+          $ref: '#/components/schemas/ReportFormat'
+          description: Case-insensitive.
+    CreateReportResponse:
+      type: object
+      required: [job_id, fy, format]
+      properties:
+        job_id:
+          $ref: '#/components/schemas/UUID'
+        fy:
+          $ref: '#/components/schemas/FinancialYear'
+        format:
+          $ref: '#/components/schemas/ReportFormat'
+    Report:
+      type: object
+      required: [id, fy, format, checksum, rules_version, size_bytes, created_at, job_id]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        fy:
+          $ref: '#/components/schemas/FinancialYear'
+        format:
+          $ref: '#/components/schemas/ReportFormat'
+        checksum:
+          type: string
+          description: Hex SHA-256 of the file.
+          pattern: '^[0-9a-f]{64}$'
+        rules_version:
+          type: string
+          examples: [fy2025-26@1]
+        size_bytes:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        job_id:
+          type: [string, 'null']
+          format: uuid
+          description: The REPORT job that produced the file.
+    ReportList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Report'
+
+    # ------------------------------------------------------------ reference
+    RatePeriod:
+      type: object
+      description: |
+        An equity STCG/LTCG rate period. **Keys are PascalCase** because the Go struct carries
+        YAML tags only (this is the one object in the API that does not use snake_case).
+      required: [From, To, STCGRate, LTCGRate]
+      properties:
+        From:
+          $ref: '#/components/schemas/Date'
+        To:
+          $ref: '#/components/schemas/Date'
+        STCGRate:
+          $ref: '#/components/schemas/Decimal'
+          description: Fraction, e.g. `"0.20"`.
+        LTCGRate:
+          $ref: '#/components/schemas/Decimal'
+          description: Fraction, e.g. `"0.125"`.
+    Rule:
+      type: object
+      required: [year, label, law, rules_version, verified_by, references, periods, ltcg_exemption, audit_threshold, audit_threshold_low_cash]
+      properties:
+        year:
+          $ref: '#/components/schemas/FinancialYear'
+        label:
+          type: string
+          examples: [Financial Year 2025-26 (AY 2026-27)]
+        law:
+          type: string
+          examples: ['Income-tax Act, 1961']
+        rules_version:
+          type: string
+          examples: [fy2025-26@1]
+        verified_by:
+          type: string
+        references:
+          type: object
+          additionalProperties:
+            type: string
+        periods:
+          type: array
+          items:
+            $ref: '#/components/schemas/RatePeriod'
+        ltcg_exemption:
+          $ref: '#/components/schemas/Decimal'
+          examples: ['125000']
+        audit_threshold:
+          $ref: '#/components/schemas/Decimal'
+          examples: ['10000000']
+        audit_threshold_low_cash:
+          $ref: '#/components/schemas/Decimal'
+          examples: ['100000000']
+    RuleList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rule'
+    BrokerList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: Sorted lower-case broker names.
+          items:
+            type: string
+          examples:
+            - [angelone, groww, upstox, zerodha]
+
+    # ------------------------------------------------------------ health
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    Readiness:
+      type: object
+      required: [database, redis]
+      properties:
+        database:
+          type: string
+          enum: [ok, unreachable]
+        redis:
+          type: string
+          enum: [ok, unreachable, not configured]
