@@ -55,7 +55,7 @@ make web       # frontend
 
 Pure Go engine (parser → normalize → corporate actions → FIFO matcher → tax rules → explain) wrapped by a chi API and River workers on Postgres, with Redis for rate limits and idempotency keys and a local-or-S3 blob store. Every stage commits its output and the next job in one transaction; progress streams to the browser over SSE. Details and diagram: [docs/architecture.md](docs/architecture.md). Decisions: [docs/adr/](docs/adr/) (FIFO per account, rules as data, holding-period boundary, pure engine, River over Kafka, sqlc over ORM, blob drivers).
 
-Windows note: `make` is not bundled with Git Bash; install it with `winget install GnuWin32.Make` and add `C:\Program Files (x86)\GnuWin32in` to PATH, or run the commands from the Makefile directly.
+Windows note: `make` is not bundled with Git Bash; install it with `winget install GnuWin32\bin` to PATH, or run the commands from the Makefile directly.
 
 ## Disclaimer
 

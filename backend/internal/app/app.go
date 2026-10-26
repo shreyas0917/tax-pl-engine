@@ -16,6 +16,8 @@ import (
 	"github.com/shreyas0917/taxpl/internal/jobs"
 	"github.com/shreyas0917/taxpl/internal/pipeline"
 	"github.com/shreyas0917/taxpl/internal/report/jsonreport"
+	"github.com/shreyas0917/taxpl/internal/report/pdfreport"
+	"github.com/shreyas0917/taxpl/internal/report/xlsxreport"
 	"github.com/shreyas0917/taxpl/internal/store"
 )
 
@@ -81,10 +83,11 @@ func New(ctx context.Context) (*App, error) {
 	return &App{Cfg: cfg, Log: log, Pool: pool, Blob: bs, Redis: rdb, Jobs: js}, nil
 }
 
-// ReportWriters lists the available report formats. Excel and PDF are registered by the
-// report packages in Phase 3; JSON is always available.
+// ReportWriters lists the available report formats.
 func ReportWriters() map[string]jobs.ReportWriter {
 	return map[string]jobs.ReportWriter{
+		"xlsx": xlsxreport.Write,
+		"pdf":  pdfreport.Write,
 		"json": func(rep *pipeline.Report, _ string) ([]byte, string, error) {
 			b, err := jsonreport.Marshal(rep)
 			return b, "application/json", err

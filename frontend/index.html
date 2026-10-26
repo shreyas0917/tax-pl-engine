@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content="Consolidate Indian broker tradebooks into FIFO-matched, explained capital-gains reports." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <title>Tax P&amp;L Engine</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('taxpl.theme');
+          var d = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var r = t === 'dark' || ((t === null || t === 'system') && d) ? 'dark' : 'light';
+          document.documentElement.dataset.theme = r;
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

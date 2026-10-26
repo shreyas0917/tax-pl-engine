@@ -1,0 +1,46 @@
+/* Design tokens: one sans, tabular figures, one accent, light and dark. */
+:root {
+  --paper: #f6f7f5;
+  --surface: #ffffff;
+  --surface-2: #eef0ed;
+  --ink: #15201c;
+  --ink-2: #3c4642;
+  --muted: #5e6963;
+  --faint: #8b948f;
+  --rule: #d8ddd9;
+  --rule-strong: #b9c1bc;
+  --accent: #2443b8;
+  --accent-ink: #ffffff;
+  --accent-soft: #e6ebfb;
+  --gain: #1b7f4b;
+  --gain-soft: #e3f3ea;
+  --loss: #b3261e;
+  --loss-soft: #fbe7e5;
+  --warn: #7a4f00;
+  --warn-soft: #fbf0d6;
+  --focus: #2443b8;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --paper: #121615;
+  --surface: #1a1f1e;
+  --surface-2: #222827;
+  --ink: #e8ece9;
+  --ink-2: #c3cac6;
+  --muted: #9aa49f;
+  --faint: #6f7974;
+  --rule: #2d3432;
+  --rule-strong: #4a5350;
+  --accent: #9db0ff;
+  --accent-ink: #0f1a3d;
+  --accent-soft: #1e2744;
+  --gain: #5bd394;
+  --gain-soft: #163326;
+  --loss: #ff8a80;
+  --loss-soft: #3d1f1c;
+  --warn: #f0c060;
+  --warn-soft: #3a2e12;
+  --focus: #9db0ff;
+  color-scheme: dark;
+}
